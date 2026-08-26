@@ -1,0 +1,47 @@
+# Development & Coding Guidelines
+
+## Architectural Rules
+- **Module Standard:** Native ESM (`import/export`) is mandatory for all Node.js services. Ensure `"type": "module"` is configured in `package.json`.
+- **Package Boundaries:** `backend/` and `dashboard/` are independent packages with their own `package.json` and `node_modules`. There is no root workspace. Backend ships one image with four entrypoints (`api`, `worker`, `jobs`, `demo-receiver`) sharing `src/shared`.
+- **Separation of Concerns:** Strictly decouple Routes, Controllers, Services, and Data Access (Prisma) layers. Routes never touch Prisma directly; services never read `req`.
+- **Shared Truth:** Queue names, retry schedule, delivery status enum, and the HMAC function live in `src/shared` only. Duplicating any of them in `api/` or `worker/` is a defect — the two processes must never be able to disagree.
+- **Fail-Fast Principle:** Validate incoming payloads at the API layer; reject invalid payloads before queuing. Validate environment variables with a zod schema at startup and exit on failure rather than starting degraded.
+- **Asynchronous Safety:** Delivery workers must only issue RabbitMQ acknowledgments (`ACK`) after the HTTP attempt is finalized and audit rows are committed to PostgreSQL, in a single transaction.
+
+## Error Handling & Reliability
+- Enforce explicit HTTP request timeouts on all external delivery attempts (`DELIVERY_CONNECT_TIMEOUT_MS` and `DELIVERY_TIMEOUT_MS`).
+- Redact sensitive values (API keys, endpoint secrets, `Authorization` headers, refresh cookies) from logs and error traces through the `pino` redaction path list, never with ad-hoc string replacement.
+- Errors thrown from services are typed (`AppError` subclasses carrying an HTTP status and a problem `type`); a single Express error middleware renders them as `application/problem+json`. Never send a raw stack trace to a client.
+- Every process implements graceful shutdown on `SIGTERM`.
+- Retries are the queue's job, not the code's: no manual `setTimeout` retry loops inside a service.
+
+## Security Rules
+- Every outbound delivery target passes the SSRF guard described in `docs/architecture.md`. There is no code path that issues a request to a user-supplied URL without it.
+- Secrets are compared with `crypto.timingSafeEqual`, never with `===`.
+- Passwords use argon2id. API keys and refresh tokens are stored hashed.
+- Every dashboard query derives `projectId` from the authenticated membership set, never from an unchecked route parameter.
+- Standard response headers are set by `helmet`, with HSTS enabled only when `NODE_ENV=production`. `x-powered-by` is removed.
+- A "not found" and a "not yours" are answered identically (`404`), so ids cannot be enumerated by comparing responses.
+- Secrets never travel in a URL, a query string or a log line — only in a request body or an `Authorization` header.
+
+## Testing
+- **Runner:** Vitest. **Integration:** Testcontainers with real Postgres, Redis and RabbitMQ — no broker or database mocks.
+- Required integration coverage: the full retry ladder to the DLQ, manual replay, idempotent republish, endpoint rate-limit parking, SSRF rejection, HMAC signature verification against an independent implementation, and worker restart during an in-flight delivery.
+- Unit tests cover pure logic: retry-level selection, failure classification, signature construction, and env schema parsing.
+- Tests never depend on wall-clock sleeps for the retry ladder; the schedule is injected so intervals collapse to milliseconds under test.
+- CI (GitHub Actions) runs lint, unit tests, integration tests, `prisma validate`, and a Docker build for both packages on every push and pull request.
+
+## Code Standards
+- Use modern JavaScript (ES6+) and native ESM syntax.
+- Handle asynchronous control flow using `async/await`; keep `try/catch` scopes tight and intentional.
+- ESLint + Prettier are authoritative; formatting is not discussed in review.
+- Node version is pinned in `engines` and `.nvmrc`, and matches the Docker base image.
+- Follow the commenting rules defined in `CLAUDE.md` without exception.
+
+## Database
+- Schema changes always go through `prisma migrate dev`; the generated SQL is committed.
+- Containers run `prisma migrate deploy` at startup, never `db push`.
+- Every query that a list view issues must be backed by an index declared in `schema.prisma`.
+- Prisma has no automatic down-migrations. A change that drops or renames a column ships as an expand-and-contract pair — add the new shape, migrate the data, remove the old one in a later release — so a rollback never lands on a schema the previous version cannot read.
+- Deletes that can touch large ranges (retention) run in bounded batches with an explicit limit, never as one unbounded statement holding a long transaction.
+- Seed data (`prisma/seed.js`) creates a demo user, project, API key and an endpoint pointing at the bundled receiver, so a fresh clone shows a working delivery within a minute.
