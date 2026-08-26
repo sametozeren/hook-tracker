@@ -1,0 +1,7 @@
+node_modules
+coverage
+src/generated
+*.log
+.env
+.env.*
+!.env.example

@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phase 0 — not started. Specification complete. Last updated 2026-08-26.
+**Status:** Phase 0 complete, acceptance check run and observed. Phase 1 next. Last updated 2026-08-26.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -32,15 +32,15 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 0 — Repository skeleton
 
-- [ ] `README.md`, `LICENSE` (MIT), `.gitignore`, `.dockerignore`, `.editorconfig`, `.nvmrc` (Node 24)
-- [ ] `.env.example` covering every key in the configuration reference
-- [ ] `backend/package.json` (`"type": "module"`, `engines`, scripts: `start:api`, `start:worker`, `start:jobs`, `start:receiver`, `lint`, `test`, `test:integration`, `seed`)
-- [ ] `dashboard/package.json` (Vue 3, Vite, Tailwind)
-- [ ] `backend/Dockerfile`, `dashboard/Dockerfile` + `dashboard/nginx.conf`
-- [ ] `docker-compose.yml` with healthchecks, the one-shot `migrate` service, and the dependency conditions from architecture §2.1
-- [ ] `backend/src/shared/config.js` — zod env schema, cross-field rules (MAX_ATTEMPTS vs schedule, production secret checks), exits on invalid input
-- [ ] `backend/src/shared/logger.js` — pino with the redaction path list
-- [ ] ESLint + Prettier config in both packages
+- [x] `README.md`, `LICENSE` (MIT), `.gitignore`, `.dockerignore`, `.editorconfig`, `.nvmrc` (Node 24)
+- [x] `.env.example` covering every key in the configuration reference
+- [x] `backend/package.json` (`"type": "module"`, `engines`, scripts: `start:api`, `start:worker`, `start:jobs`, `start:receiver`, `lint`, `test`, `test:integration`, `seed`)
+- [x] `dashboard/package.json` (Vue 3, Vite, Tailwind)
+- [x] `backend/Dockerfile`, `dashboard/Dockerfile` + `dashboard/nginx.conf`
+- [x] `docker-compose.yml` with healthchecks, the one-shot `migrate` service, and the dependency conditions from architecture §2.1
+- [x] `backend/src/shared/config.js` — zod env schema, cross-field rules (MAX_ATTEMPTS vs schedule, production secret checks), exits on invalid input
+- [x] `backend/src/shared/logger.js` — pino with the redaction path list
+- [x] ESLint + Prettier config in both packages
 
 **Acceptance:** `docker compose up` starts postgres, redis, rabbitmq and api; `GET /health` returns 200; a missing required env var stops the process with a readable message.
 
