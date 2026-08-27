@@ -1,24 +1,44 @@
-import express from 'express';
-import { pinoHttp } from 'pino-http';
 import { config } from '../shared/config.js';
-import { createLogger, REDACTION_PATHS } from '../shared/logger.js';
+import { disconnectDatabase, prisma } from '../shared/db.js';
+import { createLogger } from '../shared/logger.js';
+import { createQueueConnection } from '../shared/queue/connection.js';
+import { createPublisher } from '../shared/queue/publisher.js';
+import { assertTopology, createTopology } from '../shared/queue/topology.js';
+import { createRedisClient } from '../shared/redis.js';
+import { createApp } from './app.js';
 
 const logger = createLogger('api');
 
-const app = express();
+const redis = createRedisClient();
+const queue = await createQueueConnection({ url: config.RABBITMQ_URL, logger });
+const topology = createTopology();
 
-app.disable('x-powered-by');
-app.use(pinoHttp({ logger, redact: { paths: REDACTION_PATHS, censor: '[redacted]' } }));
+await assertTopology(queue.channel, topology);
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+const publisher = createPublisher({ channel: queue.channel, topology });
+
+const app = createApp({
+  prisma,
+  redis,
+  publisher,
+  connection: queue.connection,
+  config,
+  logger,
 });
 
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, 'api listening');
 });
 
-function shutdown(signal) {
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+
   logger.info({ signal }, 'shutting down');
 
   const timer = setTimeout(() => {
@@ -28,10 +48,16 @@ function shutdown(signal) {
 
   timer.unref();
 
-  server.close(() => {
-    clearTimeout(timer);
-    process.exit(0);
+  await new Promise((resolve) => {
+    server.close(resolve);
   });
+
+  await queue.close();
+  await redis.quit();
+  await disconnectDatabase();
+
+  clearTimeout(timer);
+  process.exit(0);
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

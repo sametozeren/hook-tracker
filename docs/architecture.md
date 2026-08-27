@@ -111,6 +111,8 @@ When `endpointIds` is supplied explicitly it overrides subscription matching, bu
 
 Publishing an event that matches no endpoint returns `422` rather than a silent `202`. Sending data nowhere is almost always a configuration error, and the caller is the only party who can fix it.
 
+A matching endpoint that is `DISABLED` still counts as a match: the event is accepted and its delivery is recorded as `SKIPPED`. The caller's configuration is correct in that case — the endpoint was disabled by hook-tracker itself — and the audit trail is the honest answer, not a `422`.
+
 ## 4. Queue Topology (TTL + DLX chain, no plugins)
 
 Delayed retries use per-level TTL queues that dead-letter back into the main queue. This requires no RabbitMQ plugin, so the official image works unmodified and a fresh clone needs no custom broker build.
@@ -200,10 +202,12 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 * Redis key `idem:{projectId}:{sha256(key)}` stores the original 202 response body for `IDEMPOTENCY_TTL_SECONDS` (default 86400).
 * A repeat within the window returns the original response with `Idempotency-Replayed: true` and creates no new deliveries.
 * A concurrent duplicate (key reserved, response not yet stored) returns `409 Conflict`.
+* A request that ends in an error releases its reservation, so a caller that fixed a validation failure can retry the same key at once instead of waiting out the TTL.
 
 ## 9. Rate Limiting
 
-* **Ingestion:** sliding-window counter in Redis per API key, `RATE_LIMIT_PUBLISH_PER_MINUTE` (default 600). Exceeding it returns `429` with `Retry-After` plus `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`.
+* **Ingestion:** sliding-window counter in Redis per API key, `RATE_LIMIT_PUBLISH_PER_MINUTE` (default 600). Exceeding it returns `429` with `Retry-After` plus `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. Those three headers are on every publish response, not only on a rejection, so a client can slow down before it is refused. A rejected call is dropped from the window again: leaving it there would let a client that keeps hammering push its own window forward and never recover.
+* `ApiKey.lastUsedAt` is refreshed at most once a minute and never blocks the response. It is a convenience column, not an audit record, and writing it on every request would put a row lock in the hot ingestion path.
 * **Per-endpoint delivery:** token bucket in Redis keyed by endpoint, sized from `Endpoint.rateLimitPerMinute`. When the worker cannot take a token it publishes the message to `webhook.throttle.10s` and acks. This does not increment `attemptCount` and writes no `DeliveryAttempt` row.
 * **Auth routes:** a stricter per-IP limit to slow credential stuffing.
 

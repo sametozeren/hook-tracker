@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phase 2 complete, acceptance check run and observed. Phase 3 next. Last updated 2026-08-27.
+**Status:** Phase 3 complete, acceptance check run and observed. Phase 4 next. Last updated 2026-08-27.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -72,12 +72,14 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 3 — Ingestion API
 
-- [ ] Express app, request id middleware, problem+json error middleware, `AppError` hierarchy, helmet, CORS from `CORS_ORIGINS`
-- [ ] API key authentication (prefix lookup, constant-time hash compare, `lastUsedAt`)
-- [ ] Redis sliding-window rate limiter with the documented response headers
-- [ ] Idempotency middleware (reserve, store, replay, `409` on concurrent duplicates)
-- [ ] `POST /v1/publish` — validation, fan-out selection, event + delivery rows, publish
-- [ ] `/health`, `/ready`
+- [x] Express app, request id middleware, problem+json error middleware, `AppError` hierarchy, helmet, CORS from `CORS_ORIGINS`
+- [x] API key authentication (prefix lookup, constant-time hash compare, `lastUsedAt`)
+- [x] Redis sliding-window rate limiter with the documented response headers
+- [x] Idempotency middleware (reserve, store, replay, `409` on concurrent duplicates)
+- [x] `POST /v1/publish` — validation, fan-out selection, event + delivery rows, publish
+- [x] `/health`, `/ready`
+- [x] `src/shared/redis.js`, `src/shared/json.js` (canonical serialisation) and `src/shared/event-types.js` (subscription matching)
+- [x] Topology asserted at API startup, and the app assembled by `createApp({ ... })` so an integration test can drive it against containers
 
 **Acceptance:** an integration test publishes an event, sees rows in Postgres and a message on the queue, gets the identical response on a repeat with the same `Idempotency-Key`, and is rate limited past the configured threshold.
 

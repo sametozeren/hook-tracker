@@ -51,6 +51,10 @@ Auth: API key. Headers: optional `Idempotency-Key`.
 
 Failure modes: `400` invalid body, `401` missing or revoked key, `413` payload above `MAX_PAYLOAD_BYTES`, `409` idempotency key in flight, `422` no matching endpoint, `429` rate limited.
 
+`413` is answered by the body parser, before authentication: a body that cannot be read cannot be authenticated either, and reading it to the end only to reject it is the thing the limit exists to prevent.
+
+Every response carries `X-Request-Id`. A caller may set the header itself — it is echoed when it matches `[A-Za-z0-9._-]{1,128}` — which is what lets a request be followed from the caller's logs into hook-tracker's.
+
 ## Authentication
 
 | Method | Path | Purpose |
