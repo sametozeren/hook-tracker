@@ -172,7 +172,9 @@ Delays carry ±10% jitter, applied as a per-message `expiration` no greater than
 * Timeouts are split: 3000 ms connect, 10000 ms total (`DELIVERY_TIMEOUT_MS`).
 * Redirects are never followed (`redirect: manual`).
 * The request body is the exact stored JSONB serialization, and the same bytes are signed.
-* Response capture: status, duration, a whitelisted header subset, and the first 8 KB of the body.
+* Response capture: status, duration, a whitelisted header subset — `content-type`, `content-length`, `retry-after`, `date`, `x-request-id` — and the first 8 KB of the body.
+* An endpoint disabled while one of its messages is already queued turns that delivery into `SKIPPED` rather than sending it: the endpoint row is read at attempt time, and disabling is meant to stop traffic immediately.
+* An unexpected error inside the handler — one that is neither an HTTP result nor a guard rejection — requeues the message once. A message that fails twice is acked and its delivery is left `IN_FLIGHT` for the stuck sweeper, because requeueing forever would spin on a message this worker cannot process at all.
 * **SSRF guard (mandatory).** The target host is resolved before connecting and rejected when it maps to loopback, private (RFC1918), link-local (including `169.254.169.254`), CGNAT, multicast or reserved ranges. The resolved IP is pinned for the connection so DNS cannot be re-pointed between check and connect. `SSRF_ALLOW_PRIVATE` defaults to `false`; the compose demo sets `SSRF_ALLOWLIST_HOSTS=receiver` so only the bundled receiver is reachable inside the Docker network.
 * Only `http` and `https` schemes are accepted; non-standard ports can be blocked via `SSRF_BLOCKED_PORTS`.
 * The endpoint row is read at attempt time, not captured when the event was published. A URL or secret edited between attempts applies to the next retry, which is what makes fixing a wrong URL and waiting for the retry a valid recovery path. The event payload, by contrast, is immutable once ingested.
@@ -213,7 +215,7 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 
 ## 10. Endpoint Health & Circuit Breaking
 
-`Endpoint.consecutiveFailures` increments on each permanent failure and resets on any success. At `ENDPOINT_AUTO_DISABLE_THRESHOLD` (default 20) the endpoint moves to `DISABLED`, an `endpoint.disabled` event is emitted, and new publishes skip it — recorded as a `SKIPPED` delivery so the audit trail stays complete. Re-enabling is a manual dashboard action.
+`Endpoint.consecutiveFailures` increments on each permanent failure and resets on any success. The counter is written from the value read at the start of the attempt, so two workers failing against the same endpoint at the same moment can cost one increment rather than two — the threshold is a health signal, not an exact count. At `ENDPOINT_AUTO_DISABLE_THRESHOLD` (default 20) the endpoint moves to `DISABLED`, an `endpoint.disabled` event is emitted, and new publishes skip it — recorded as a `SKIPPED` delivery so the audit trail stays complete. Re-enabling is a manual dashboard action.
 
 ## 11. Data Model (Prisma / PostgreSQL)
 
@@ -284,7 +286,7 @@ endpoint.disabled   { endpointId, consecutiveFailures, disabledAt }
 ```
 
   Payloads carry ids, never the webhook body or any secret; the dashboard fetches detail over the API when a row is opened.
-* Workers hold no sockets. They publish to Redis pub/sub and API instances fan out through `@socket.io/redis-adapter`, which is also what makes multiple API replicas correct.
+* Workers hold no sockets. They publish to the Redis channel `realtime:{projectId}` as `{ event, payload }`, and API instances fan out through `@socket.io/redis-adapter`, which is also what makes multiple API replicas correct. A realtime publish that fails is logged and dropped: it must never fail a delivery that already committed.
 * Emissions are throttled per project (`REALTIME_MAX_EVENTS_PER_SECOND`) so a burst cannot drown the dashboard.
 * A socket outlives the 1-hour access token that opened it. The server records each connection's token expiry and disconnects it with a `token_expired` reason at that moment; the client refreshes and reconnects. Sockets are not left authenticated indefinitely, and revoking a session takes effect within the access token's remaining life rather than never.
 

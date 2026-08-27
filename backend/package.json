@@ -36,6 +36,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "prisma": "^7.10.0",
+    "undici": "^8.10.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
