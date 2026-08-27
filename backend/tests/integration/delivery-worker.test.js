@@ -1,20 +1,19 @@
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
-import { GenericContainer, Wait } from 'testcontainers';
+import { spawn } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { config } from '../../src/shared/config.js';
-import { encryptSecret } from '../../src/shared/crypto.js';
-import { createPrismaClient } from '../../src/shared/db.js';
-import { newId } from '../../src/shared/ids.js';
-import { closeQuietly, createQueueConnection } from '../../src/shared/queue/connection.js';
 import { createPublisher } from '../../src/shared/queue/publisher.js';
+import { RETRY_SCHEDULE } from '../../src/shared/retry.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { createRealtimePublisher } from '../../src/shared/realtime.js';
-import { createRedisClient } from '../../src/shared/redis.js';
 import { createTokenBucket } from '../../src/shared/token-bucket.js';
 import { createDeliveryHandler } from '../../src/worker/handle-delivery.js';
-
-const run = promisify(execFile);
+import { recordInto } from '../support/consume.js';
+import {
+  createDelivery as createDeliveryRow,
+  createEndpoint as createEndpointRow,
+  createProject,
+} from '../support/fixtures.js';
+import { wait, waitFor } from '../support/poll.js';
+import { closeClients, openClients, testConfig } from '../support/stack.js';
 
 const RECEIVER_PORT = 4000;
 const RECEIVER_URL = `http://localhost:${RECEIVER_PORT}`;
@@ -22,12 +21,9 @@ const RECEIVER_SECRET = 'whsec_test_receiver_secret';
 const RETRY_DELAY_MS = 120;
 const THROTTLE_DELAY_MS = 250;
 
-// Five levels, milliseconds apart: the same ladder the production schedule
-// describes, collapsed so a full run to the DLQ finishes inside a test.
-const schedule = ['1m', '5m', '30m', '2h', '6h'].map((level) => ({
-  level,
-  delayMs: RETRY_DELAY_MS,
-}));
+// The real ladder's shape, collapsed to milliseconds. Deriving it from
+// RETRY_SCHEDULE keeps the test exercising the levels the system actually has.
+const schedule = RETRY_SCHEDULE.map((level) => ({ ...level, delayMs: RETRY_DELAY_MS }));
 
 const topology = createTopology({
   namespace: 'itest-worker',
@@ -35,8 +31,7 @@ const topology = createTopology({
   throttleDelayMs: THROTTLE_DELAY_MS,
 });
 
-const handlerConfig = {
-  ...config,
+const handlerConfig = testConfig({
   MAX_ATTEMPTS: 6,
   DELIVERY_CONNECT_TIMEOUT_MS: 800,
   DELIVERY_TIMEOUT_MS: 1500,
@@ -46,13 +41,11 @@ const handlerConfig = {
   SSRF_BLOCKED_PORTS: [22, 5432],
   ENDPOINT_AUTO_DISABLE_THRESHOLD: 20,
   SECRET_ROTATION_GRACE_HOURS: 24,
-};
+});
 
-let containers = [];
+let clients;
 let receiver;
 let prisma;
-let redis;
-let subscriber;
 let queue;
 let publisher;
 let handler;
@@ -61,30 +54,6 @@ let consumerTag;
 
 const deadLettered = [];
 const realtimeEvents = [];
-
-async function wait(ms) {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-async function waitFor(probe, { timeoutMs = 15_000, intervalMs = 30 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-
-  for (;;) {
-    const result = await probe();
-
-    if (result) {
-      return result;
-    }
-
-    if (Date.now() > deadline) {
-      throw new Error('condition was not met before the timeout');
-    }
-
-    await wait(intervalMs);
-  }
-}
 
 async function startConsumer() {
   const { consumerTag: tag } = await queue.channel.consume(
@@ -112,33 +81,21 @@ async function stopConsumer() {
   }
 }
 
-async function createEndpoint({ url, rateLimitPerMinute = 600, status = 'ACTIVE' }) {
-  return prisma.endpoint.create({
-    data: {
-      id: newId('endpoint'),
-      projectId: project.id,
-      url,
-      status,
-      rateLimitPerMinute,
-      secret: encryptSecret(RECEIVER_SECRET),
-      eventTypes: [],
-    },
+function createEndpoint({ url, rateLimitPerMinute = 600, status = 'ACTIVE' }) {
+  return createEndpointRow(prisma, {
+    projectId: project.id,
+    url,
+    status,
+    rateLimitPerMinute,
+    secret: RECEIVER_SECRET,
   });
 }
 
-async function createDelivery(endpoint, payload = { orderId: 1234 }) {
-  const event = await prisma.webhookEvent.create({
-    data: {
-      id: newId('event'),
-      projectId: project.id,
-      eventType: 'order.created',
-      payload,
-      idempotencyKey: newId('event'),
-    },
-  });
-
-  return prisma.delivery.create({
-    data: { id: newId('delivery'), eventId: event.id, endpointId: endpoint.id },
+function createDelivery(endpoint, payload = { orderId: 1234 }) {
+  return createDeliveryRow(prisma, {
+    projectId: project.id,
+    endpointId: endpoint.id,
+    payload,
   });
 }
 
@@ -164,65 +121,17 @@ async function receivedRequests() {
 }
 
 beforeAll(async () => {
-  const [postgres, redisContainer, rabbitmq] = await Promise.all([
-    new GenericContainer('postgres:17-alpine')
-      .withEnvironment({
-        POSTGRES_USER: 'hooktracker',
-        POSTGRES_PASSWORD: 'hooktracker',
-        POSTGRES_DB: 'hooktracker',
-      })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
-      .withStartupTimeout(180_000)
-      .start(),
-    new GenericContainer('redis:8-alpine')
-      .withExposedPorts(6379)
-      .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
-      .withStartupTimeout(180_000)
-      .start(),
-    new GenericContainer('rabbitmq:4-management-alpine')
-      .withExposedPorts(5672)
-      .withWaitStrategy(Wait.forLogMessage(/Server startup complete/))
-      .withStartupTimeout(180_000)
-      .start(),
-  ]);
+  clients = await openClients({ subscriber: true });
+  prisma = clients.prisma;
+  queue = clients.queue;
 
-  containers = [postgres, redisContainer, rabbitmq];
-
-  const databaseUrl = `postgresql://hooktracker:hooktracker@${postgres.getHost()}:${postgres.getMappedPort(5432)}/hooktracker?schema=public`;
-
-  await run('npx', ['prisma', 'migrate', 'deploy'], {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    shell: true,
-  });
-
-  prisma = createPrismaClient({ connectionString: databaseUrl });
-
-  const redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
-
-  redis = createRedisClient({ url: redisUrl });
-  subscriber = createRedisClient({ url: redisUrl });
-
-  await subscriber.psubscribe('realtime:*');
-  subscriber.on('pmessage', (_pattern, channel, payload) => {
+  await clients.subscriber.psubscribe('realtime:*');
+  clients.subscriber.on('pmessage', (_pattern, channel, payload) => {
     realtimeEvents.push({ channel, ...JSON.parse(payload) });
   });
 
-  queue = await createQueueConnection({
-    url: `amqp://guest:guest@${rabbitmq.getHost()}:${rabbitmq.getMappedPort(5672)}`,
-    attempts: 10,
-    baseDelayMs: 250,
-  });
-
   await assertTopology(queue.channel, topology);
-  await queue.channel.consume(topology.deadLetterQueue, (message) => {
-    if (!message) {
-      return;
-    }
-
-    queue.channel.ack(message);
-    deadLettered.push(JSON.parse(message.content.toString('utf8')));
-  });
+  await recordInto(queue.channel, topology.deadLetterQueue, deadLettered);
 
   // The real receiver, not a stand-in: the routes under test are the ones a
   // fresh clone gets, and it verifies the signature with the same secret.
@@ -241,17 +150,15 @@ beforeAll(async () => {
     }
   });
 
-  project = await prisma.project.create({
-    data: { id: newId('project'), name: 'Worker Project', slug: `worker-${Date.now()}` },
-  });
+  project = await createProject(prisma, 'itest-worker');
 
   publisher = createPublisher({ channel: queue.channel, topology });
 
   handler = createDeliveryHandler({
     prisma,
     publisher,
-    realtime: createRealtimePublisher({ redis }),
-    tokenBucket: createTokenBucket({ redis }),
+    realtime: createRealtimePublisher({ redis: clients.redis }),
+    tokenBucket: createTokenBucket({ redis: clients.redis }),
     config: handlerConfig,
     schedule,
   });
@@ -264,12 +171,7 @@ afterAll(async () => {
 
   receiver?.kill();
 
-  await closeQuietly(queue?.channel);
-  await closeQuietly(queue?.connection);
-  await subscriber?.quit();
-  await redis?.quit();
-  await prisma?.$disconnect();
-  await Promise.all(containers.map((container) => container.stop()));
+  await closeClients(clients);
 });
 
 describe('successful delivery', () => {

@@ -1,6 +1,7 @@
 import express from 'express';
 import { config } from '../shared/config.js';
-import { verifySignature } from '../shared/hmac.js';
+import { WEBHOOK_HEADERS, verifySignature } from '../shared/hmac.js';
+import { closeServer, onShutdown } from '../shared/lifecycle.js';
 import { createLogger } from '../shared/logger.js';
 
 const RECEIVER_PORT = 4000;
@@ -33,9 +34,9 @@ function parseBody(raw) {
 function record(req) {
   const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   const signature = verifySignature({
-    header: req.get('x-webhook-signature'),
+    header: req.get(WEBHOOK_HEADERS.signature),
     secret: config.DEMO_ENDPOINT_SECRET,
-    timestamp: req.get('x-webhook-timestamp'),
+    timestamp: req.get(WEBHOOK_HEADERS.timestamp),
     rawBody: raw,
   });
 
@@ -43,9 +44,9 @@ function record(req) {
     receivedAt: new Date().toISOString(),
     method: req.method,
     path: req.originalUrl,
-    webhookId: req.get('x-webhook-id') ?? null,
-    eventType: req.get('x-webhook-event') ?? null,
-    attempt: Number(req.get('x-webhook-attempt')) || null,
+    webhookId: req.get(WEBHOOK_HEADERS.id) ?? null,
+    eventType: req.get(WEBHOOK_HEADERS.event) ?? null,
+    attempt: Number(req.get(WEBHOOK_HEADERS.attempt)) || null,
     signatureValid: signature.valid,
     signatureReason: signature.reason ?? null,
     headers: req.headers,
@@ -132,17 +133,8 @@ const server = app.listen(RECEIVER_PORT, () => {
   logger.info({ port: RECEIVER_PORT }, 'demo receiver listening');
 });
 
-function shutdown(signal) {
-  logger.info({ signal }, 'shutting down');
-
-  const timer = setTimeout(() => process.exit(1), config.SHUTDOWN_GRACE_MS);
-
-  timer.unref();
-  server.close(() => {
-    clearTimeout(timer);
-    process.exit(0);
-  });
-}
-
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+onShutdown({
+  logger,
+  graceMs: config.SHUTDOWN_GRACE_MS,
+  close: () => closeServer(server),
+});

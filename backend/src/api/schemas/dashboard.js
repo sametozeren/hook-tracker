@@ -1,9 +1,12 @@
 import { z } from 'zod';
+import { DELIVERY_STATUS_VALUES } from '../../shared/delivery-status.js';
 import { EVENT_TYPE_PATTERN, MAX_EVENT_TYPE_LENGTH } from '../../shared/event-types.js';
 
 const MIN_PASSWORD_LENGTH = 12;
 
 const name = z.string().trim().min(1).max(120);
+
+const email = z.email().max(254);
 
 const eventTypePattern = z
   .string()
@@ -16,21 +19,19 @@ const eventTypePattern = z
 
 export const registerSchema = z
   .object({
-    email: z.email().max(254),
+    email,
     password: z.string().min(MIN_PASSWORD_LENGTH).max(200),
     name,
     projectName: name,
   })
   .strict();
 
-export const loginSchema = z
-  .object({ email: z.email().max(254), password: z.string().min(1).max(200) })
-  .strict();
+export const loginSchema = z.object({ email, password: z.string().min(1).max(200) }).strict();
 
 export const projectSchema = z.object({ name }).strict();
 
 export const memberSchema = z
-  .object({ email: z.email().max(254), role: z.enum(['OWNER', 'MEMBER']).default('MEMBER') })
+  .object({ email, role: z.enum(['OWNER', 'MEMBER']).default('MEMBER') })
   .strict();
 
 export const apiKeySchema = z.object({ name }).strict();
@@ -48,9 +49,7 @@ export const endpointUpdateSchema = endpointCreateSchema.partial().strict();
 
 export const deliveryFilterSchema = z
   .object({
-    status: z
-      .enum(['PENDING', 'IN_FLIGHT', 'RETRYING', 'SUCCEEDED', 'FAILED_PERMANENTLY', 'SKIPPED'])
-      .optional(),
+    status: z.enum(DELIVERY_STATUS_VALUES).optional(),
     endpointId: z.string().min(1).optional(),
     eventType: z.string().max(MAX_EVENT_TYPE_LENGTH).optional(),
     from: z.iso.datetime({ offset: true }).optional(),

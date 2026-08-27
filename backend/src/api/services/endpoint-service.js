@@ -1,4 +1,5 @@
 import { encryptSecret, generateEndpointSecret } from '../../shared/crypto.js';
+import { ENDPOINT_STATUS } from '../../shared/delivery-status.js';
 import { ConflictError, NotFoundError, UnprocessableError } from '../../shared/errors.js';
 import { newId } from '../../shared/ids.js';
 import { resolveSafeTarget } from '../../shared/ssrf.js';
@@ -65,7 +66,7 @@ export function createEndpointService({
         orderBy: { createdAt: 'desc' },
       });
 
-      return endpoints.map(endpointView);
+      return { endpoints: endpoints.map(endpointView) };
     },
 
     async create({ projectId, url, description, eventTypes, rateLimitPerMinute }) {
@@ -128,7 +129,7 @@ export function createEndpointService({
 
       const updated = await prisma.endpoint.update({
         where: { id: endpoint.id },
-        data: { status: 'ACTIVE', consecutiveFailures: 0 },
+        data: { status: ENDPOINT_STATUS.ACTIVE, consecutiveFailures: 0 },
       });
 
       return endpointView(updated);
@@ -139,7 +140,7 @@ export function createEndpointService({
 
       const updated = await prisma.endpoint.update({
         where: { id: endpoint.id },
-        data: { status: 'DISABLED' },
+        data: { status: ENDPOINT_STATUS.DISABLED },
       });
 
       return endpointView(updated);

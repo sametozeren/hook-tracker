@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import vue from 'eslint-plugin-vue';
 import globals from 'globals';
 import prettier from 'eslint-config-prettier';
-import paddingAroundDefinitions from '../tools/eslint-rules/padding-around-definitions.js';
+import { hookTrackerPlugin, sharedRules } from '../tools/eslint-rules/shared.js';
 
 export default [
   { ignores: ['node_modules/**', 'dist/**'] },
@@ -15,18 +15,8 @@ export default [
       sourceType: 'module',
       globals: { ...globals.browser },
     },
-    plugins: {
-      'hook-tracker': { rules: { 'padding-around-definitions': paddingAroundDefinitions } },
-    },
-    rules: {
-      'no-console': 'error',
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
-      eqeqeq: ['error', 'always'],
-      'prefer-const': 'error',
-      'no-var': 'error',
-      'hook-tracker/padding-around-definitions': 'error',
-      'lines-between-class-members': ['error', 'always', { exceptAfterSingleLine: true }],
-    },
+    plugins: hookTrackerPlugin,
+    rules: sharedRules,
   },
   {
     files: ['vite.config.js'],

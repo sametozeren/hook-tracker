@@ -312,7 +312,7 @@ hooktracker_endpoints_disabled_total
 
 Labels are deliberately low-cardinality: no project id, endpoint id or URL appears in a label. Prometheus creates one time series per label combination, so a per-project label turns into unbounded series growth as tenants are added. Per-project figures come from the database through `GET /v1/projects/:projectId/stats`, which is what the dashboard uses.
 * Structured JSON logs via `pino`, carrying `requestId` on the API and `deliveryId` with `attempt` on the worker. Secrets, API keys and `Authorization` headers are removed through a pino redaction path list rather than ad-hoc string handling.
-* Graceful shutdown on `SIGTERM`: stop consuming, wait for in-flight attempts up to `SHUTDOWN_GRACE_MS`, close the channel, then the connection pool.
+* Graceful shutdown on `SIGTERM`: stop consuming, wait for in-flight attempts up to `SHUTDOWN_GRACE_MS`, close the channel, then the connection pool. The surrounding sequence — one shutdown per process, the force-exit timer, the exit code — is `shared/lifecycle.js`, so a new entrypoint gets it by construction rather than by being copied correctly. The worker drains for a share of the grace period and leaves the rest for the closes, so the two cannot race.
 
 ## 15. Retention & Maintenance Jobs
 

@@ -22,9 +22,7 @@ export function createProjectRouter({
   router.use(jwtAuth);
 
   router.get('/projects', async (req, res) => {
-    res
-      .status(200)
-      .json({ projects: await projectService.list({ memberships: req.auth.memberships }) });
+    res.status(200).json(await projectService.list({ memberships: req.auth.memberships }));
   });
 
   router.post('/projects', validateBody(projectSchema), async (req, res) => {
@@ -48,9 +46,7 @@ export function createProjectRouter({
   );
 
   router.get('/projects/:projectId/members', requireProjectRole(), async (req, res) => {
-    res
-      .status(200)
-      .json({ members: await projectService.members({ projectId: req.params.projectId }) });
+    res.status(200).json(await projectService.members({ projectId: req.params.projectId }));
   });
 
   router.post(
@@ -80,9 +76,7 @@ export function createProjectRouter({
   );
 
   router.get('/projects/:projectId/api-keys', requireProjectRole(), async (req, res) => {
-    res
-      .status(200)
-      .json({ apiKeys: await apiKeyService.list({ projectId: req.params.projectId }) });
+    res.status(200).json(await apiKeyService.list({ projectId: req.params.projectId }));
   });
 
   router.post(
@@ -111,9 +105,7 @@ export function createProjectRouter({
   );
 
   router.get('/projects/:projectId/endpoints', requireProjectRole(), async (req, res) => {
-    res
-      .status(200)
-      .json({ endpoints: await endpointService.list({ projectId: req.params.projectId }) });
+    res.status(200).json(await endpointService.list({ projectId: req.params.projectId }));
   });
 
   router.post(

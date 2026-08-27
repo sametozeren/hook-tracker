@@ -7,10 +7,9 @@ import {
   selectRetryLevel,
   shouldRetry,
 } from '../shared/retry.js';
-import { resolveSafeTarget } from '../shared/ssrf.js';
+import { DELIVERY_STATUS, ENDPOINT_STATUS, TERMINAL_STATUSES } from '../shared/delivery-status.js';
+import { SSRF_ERROR_CODE, resolveSafeTarget } from '../shared/ssrf.js';
 import { deliveryHeaders } from './signing.js';
-
-const TERMINAL_STATUSES = new Set(['SUCCEEDED', 'FAILED_PERMANENTLY', 'SKIPPED']);
 
 export function retryAfterSeconds(responseHeaders) {
   const value = responseHeaders?.['retry-after'];
@@ -83,7 +82,7 @@ export function createDeliveryHandler({
       prisma.delivery.update({
         where: { id: delivery.id },
         data: {
-          status: 'SUCCEEDED',
+          status: DELIVERY_STATUS.SUCCEEDED,
           attemptCount: attempt,
           lastError: null,
           nextAttemptAt: null,
@@ -117,7 +116,7 @@ export function createDeliveryHandler({
       prisma.delivery.update({
         where: { id: delivery.id },
         data: {
-          status: 'RETRYING',
+          status: DELIVERY_STATUS.RETRYING,
           attemptCount: attempt,
           lastError: describe(result),
           nextAttemptAt,
@@ -151,14 +150,15 @@ export function createDeliveryHandler({
     const { endpoint } = delivery;
     const failures = endpoint.consecutiveFailures + 1;
     const disable =
-      endpoint.status === 'ACTIVE' && failures >= config.ENDPOINT_AUTO_DISABLE_THRESHOLD;
+      endpoint.status === ENDPOINT_STATUS.ACTIVE &&
+      failures >= config.ENDPOINT_AUTO_DISABLE_THRESHOLD;
 
     await commit([
       prisma.deliveryAttempt.create({ data: attemptRow(delivery.id, attempt, result) }),
       prisma.delivery.update({
         where: { id: delivery.id },
         data: {
-          status: 'FAILED_PERMANENTLY',
+          status: DELIVERY_STATUS.FAILED_PERMANENTLY,
           attemptCount: attempt,
           lastError: describe(result),
           nextAttemptAt: null,
@@ -169,7 +169,7 @@ export function createDeliveryHandler({
         where: { id: endpoint.id },
         data: {
           consecutiveFailures: failures,
-          ...(disable ? { status: 'DISABLED' } : {}),
+          ...(disable ? { status: ENDPOINT_STATUS.DISABLED } : {}),
         },
       }),
     ]);
@@ -218,10 +218,14 @@ export function createDeliveryHandler({
 
     const { endpoint, event } = delivery;
 
-    if (endpoint.status === 'DISABLED') {
+    if (endpoint.status === ENDPOINT_STATUS.DISABLED) {
       await prisma.delivery.update({
         where: { id: delivery.id },
-        data: { status: 'SKIPPED', completedAt: now(), lastError: 'endpoint is disabled' },
+        data: {
+          status: DELIVERY_STATUS.SKIPPED,
+          completedAt: now(),
+          lastError: 'endpoint is disabled',
+        },
       });
 
       return { outcome: 'endpoint_disabled' };
@@ -240,7 +244,10 @@ export function createDeliveryHandler({
       return { outcome: 'throttled' };
     }
 
-    await prisma.delivery.update({ where: { id: delivery.id }, data: { status: 'IN_FLIGHT' } });
+    await prisma.delivery.update({
+      where: { id: delivery.id },
+      data: { status: DELIVERY_STATUS.IN_FLIGHT },
+    });
 
     const startedAt = now();
     const rawBody = JSON.stringify(event.payload);
@@ -255,7 +262,7 @@ export function createDeliveryHandler({
       });
     } catch (error) {
       const result = {
-        errorCode: error.code ?? 'SSRF_BLOCKED',
+        errorCode: error.code ?? SSRF_ERROR_CODE,
         errorMessage: error.message,
         durationMs: 0,
       };
@@ -264,7 +271,7 @@ export function createDeliveryHandler({
         delivery,
         attempt,
         result,
-        reason: 'PERMANENT',
+        reason: FAILURE.PERMANENT,
         completedAt: now(),
       });
 

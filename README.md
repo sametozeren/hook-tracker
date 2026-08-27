@@ -61,8 +61,9 @@ cd ../dashboard && npm install
 ```
 
 Both packages expose `npm run lint` and `npm run format`. The backend adds
-`npm test` (unit) and `npm run test:integration` (Testcontainers, real Postgres,
-Redis and RabbitMQ).
+`npm test` (unit), `npm run test:integration` (Testcontainers, real Postgres,
+Redis and RabbitMQ) and `npm run test:docker`, a one-test probe that tells a
+Docker problem apart from a code one.
 
 ## License
 

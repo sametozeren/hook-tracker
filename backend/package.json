@@ -18,8 +18,9 @@
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "test": "vitest run --dir tests/unit",
-    "test:integration": "vitest run --dir tests/integration",
-    "queue:reset": "node scripts/queue-reset.js"
+    "test:integration": "vitest run --config vitest.integration.config.js",
+    "queue:reset": "node scripts/queue-reset.js",
+    "test:docker": "vitest run tests/integration/docker-environment.test.js"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.1.0",

@@ -4,7 +4,8 @@
 - **Module Standard:** Native ESM (`import/export`) is mandatory for all Node.js services. Ensure `"type": "module"` is configured in `package.json`.
 - **Package Boundaries:** `backend/` and `dashboard/` are independent packages with their own `package.json` and `node_modules`. There is no root workspace. Backend ships one image with four entrypoints (`api`, `worker`, `jobs`, `demo-receiver`) sharing `src/shared`.
 - **Separation of Concerns:** Strictly decouple Routes, Controllers, Services, and Data Access (Prisma) layers. Routes never touch Prisma directly; services never read `req`.
-- **Shared Truth:** Queue names, retry schedule, delivery status enum, and the HMAC function live in `src/shared` only. Duplicating any of them in `api/` or `worker/` is a defect — the two processes must never be able to disagree.
+- **Shared Truth:** Queue names, retry schedule, delivery status enum, and the HMAC function live in `src/shared` only. Duplicating any of them in `api/` or `worker/` is a defect — the two processes must never be able to disagree. Concretely: `queue/topology.js`, `retry.js`, `delivery-status.js`, and `hmac.js` (which also owns the outbound header names, since the signer and the receiver must read the same ones).
+- **One shutdown:** `shared/lifecycle.js` owns the part every process shares — one shutdown per process however many signals arrive, a force-exit timer, the exit code. Each entrypoint passes what to close; none of them re-implements the surrounding sequence.
 - **Fail-Fast Principle:** Validate incoming payloads at the API layer; reject invalid payloads before queuing. Validate environment variables with a zod schema at startup and exit on failure rather than starting degraded.
 - **Asynchronous Safety:** Delivery workers must only issue RabbitMQ acknowledgments (`ACK`) after the HTTP attempt is finalized and audit rows are committed to PostgreSQL, in a single transaction.
 
@@ -26,6 +27,7 @@
 
 ## Testing
 - **Runner:** Vitest. **Integration:** Testcontainers with real Postgres, Redis and RabbitMQ — no broker or database mocks.
+- The integration files share one stack, started once by `tests/support/global-setup.js` (`npm run test:integration`, `vitest.integration.config.js`). Isolation comes from a per-file queue namespace and a per-file project row, not from a container each. `npm run test:docker` runs the standalone environment probe, which deliberately sits outside that setup so a Docker fault is told apart from a code fault.
 - Required integration coverage: the full retry ladder to the DLQ, manual replay, idempotent republish, endpoint rate-limit parking, SSRF rejection, HMAC signature verification against an independent implementation, and worker restart during an in-flight delivery.
 - Unit tests cover pure logic: retry-level selection, failure classification, signature construction, and env schema parsing.
 - Tests never depend on wall-clock sleeps for the retry ladder; the schedule is injected so intervals collapse to milliseconds under test.

@@ -21,7 +21,7 @@ export function createApiKeyService({ prisma, now = () => new Date() }) {
         orderBy: { createdAt: 'desc' },
       });
 
-      return keys.map(keyView);
+      return { apiKeys: keys.map(keyView) };
     },
 
     // The plaintext is returned exactly once, here. Only its sha256 is stored,

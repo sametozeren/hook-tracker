@@ -1,5 +1,5 @@
 import { decryptSecret } from '../shared/crypto.js';
-import { buildSignatureHeader } from '../shared/hmac.js';
+import { WEBHOOK_HEADERS, WEBHOOK_USER_AGENT, buildSignatureHeader } from '../shared/hmac.js';
 
 const HOUR_MS = 3_600_000;
 
@@ -26,12 +26,12 @@ export function deliveryHeaders({ delivery, event, endpoint, attempt, rawBody, g
 
   return {
     'content-type': 'application/json',
-    'user-agent': 'HookTracker/1.0',
-    'x-webhook-id': delivery.id,
-    'x-webhook-event': event.eventType,
-    'x-webhook-attempt': String(attempt),
-    'x-webhook-timestamp': String(timestamp),
-    'x-webhook-signature': buildSignatureHeader({
+    'user-agent': WEBHOOK_USER_AGENT,
+    [WEBHOOK_HEADERS.id]: delivery.id,
+    [WEBHOOK_HEADERS.event]: event.eventType,
+    [WEBHOOK_HEADERS.attempt]: String(attempt),
+    [WEBHOOK_HEADERS.timestamp]: String(timestamp),
+    [WEBHOOK_HEADERS.signature]: buildSignatureHeader({
       secrets: activeSecrets(endpoint, { graceHours, now }),
       timestamp,
       rawBody,

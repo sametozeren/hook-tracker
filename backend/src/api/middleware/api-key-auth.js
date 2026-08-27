@@ -1,22 +1,19 @@
 import { apiKeyPrefix, constantTimeEquals, hashApiKey } from '../../shared/crypto.js';
 import { UnauthorizedError } from '../../shared/errors.js';
-
-const BEARER = /^Bearer\s+(\S+)$/i;
+import { bearerToken } from '../bearer.js';
 
 const ABSENT_KEY_HASH = '0'.repeat(64);
 
 const LAST_USED_THRESHOLD_MS = 60_000;
 
 function presentedKey(req) {
-  const match = BEARER.exec(req.get('authorization') ?? '');
+  const plaintext = bearerToken(req);
 
-  if (!match) {
+  if (!plaintext) {
     throw new UnauthorizedError('An API key is required: Authorization: Bearer ht_<key>');
   }
 
   try {
-    const plaintext = match[1];
-
     return { plaintext, prefix: apiKeyPrefix(plaintext) };
   } catch {
     throw new UnauthorizedError('The API key is malformed');

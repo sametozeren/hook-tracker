@@ -1,5 +1,19 @@
 name: hook-tracker
 
+# The dependency set every application process shares. An anchor rather than
+# four copies: a service that stopped waiting for `migrate` would start against
+# an unmigrated schema, and that is a difference too easy to introduce by
+# editing one stanza and not the other.
+x-backend-depends-on: &backend-depends-on
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -64,15 +78,7 @@ services:
       - .env
     ports:
       - '${PORT:-3000}:3000'
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    depends_on: *backend-depends-on
     healthcheck:
       test:
         [
@@ -93,15 +99,7 @@ services:
     command: ['node', 'src/worker/worker.js']
     env_file:
       - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+    depends_on: *backend-depends-on
     deploy:
       replicas: 1
     restart: unless-stopped

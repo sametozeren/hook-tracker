@@ -1,7 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { UnauthorizedError } from '../../shared/errors.js';
-
-const BEARER = /^Bearer\s+(\S+)$/i;
+import { bearerToken } from '../bearer.js';
 
 export function verifyAccessToken(token, secret) {
   try {
@@ -13,13 +12,13 @@ export function verifyAccessToken(token, secret) {
 
 export function createJwtAuth({ prisma, config }) {
   return async function jwtAuth(req, res, next) {
-    const match = BEARER.exec(req.get('authorization') ?? '');
+    const token = bearerToken(req);
 
-    if (!match) {
+    if (!token) {
       throw new UnauthorizedError('An access token is required: Authorization: Bearer <jwt>');
     }
 
-    const payload = verifyAccessToken(match[1], config.JWT_SECRET);
+    const payload = verifyAccessToken(token, config.JWT_SECRET);
 
     // The membership set is read per request rather than carried in the token,
     // so removing someone from a project takes effect at once instead of when

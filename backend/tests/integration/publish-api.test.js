@@ -1,29 +1,21 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { pino } from 'pino';
-import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/app.js';
-import { config } from '../../src/shared/config.js';
-import { encryptSecret, generateApiKey, generateEndpointSecret } from '../../src/shared/crypto.js';
-import { createPrismaClient } from '../../src/shared/db.js';
+import { generateApiKey } from '../../src/shared/crypto.js';
 import { newId } from '../../src/shared/ids.js';
-import { closeQuietly, createQueueConnection } from '../../src/shared/queue/connection.js';
 import { createPublisher } from '../../src/shared/queue/publisher.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
-import { createRedisClient } from '../../src/shared/redis.js';
-
-const run = promisify(execFile);
+import { recordInto } from '../support/consume.js';
+import { createEndpoint, createProject } from '../support/fixtures.js';
+import { waitFor } from '../support/poll.js';
+import { closeClients, openClients, silentLogger, testConfig } from '../support/stack.js';
 
 const RATE_LIMIT = 5;
 const MAX_PAYLOAD_BYTES = 4096;
 
 const topology = createTopology({ namespace: 'itest-api' });
 
-let containers = [];
+let clients;
 let prisma;
-let redis;
-let queue;
 let server;
 let baseUrl;
 let project;
@@ -33,26 +25,6 @@ let foreignEndpoint;
 let apiKey;
 
 const queued = [];
-
-async function waitFor(predicate, { timeoutMs = 10_000, intervalMs = 25 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-
-  for (;;) {
-    const result = predicate();
-
-    if (result) {
-      return result;
-    }
-
-    if (Date.now() > deadline) {
-      throw new Error('condition was not met before the timeout');
-    }
-
-    await new Promise((resolve) => {
-      setTimeout(resolve, intervalMs);
-    });
-  }
-}
 
 async function publish(body, { key = apiKey, headers = {} } = {}) {
   const response = await fetch(`${baseUrl}/v1/publish`, {
@@ -85,110 +57,44 @@ async function createApiKeyRow(name) {
 }
 
 beforeAll(async () => {
-  const [postgres, redisContainer, rabbitmq] = await Promise.all([
-    new GenericContainer('postgres:17-alpine')
-      .withEnvironment({
-        POSTGRES_USER: 'hooktracker',
-        POSTGRES_PASSWORD: 'hooktracker',
-        POSTGRES_DB: 'hooktracker',
-      })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
-      .withStartupTimeout(180_000)
-      .start(),
-    new GenericContainer('redis:8-alpine')
-      .withExposedPorts(6379)
-      .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
-      .withStartupTimeout(180_000)
-      .start(),
-    new GenericContainer('rabbitmq:4-management-alpine')
-      .withExposedPorts(5672)
-      .withWaitStrategy(Wait.forLogMessage(/Server startup complete/))
-      .withStartupTimeout(180_000)
-      .start(),
-  ]);
+  clients = await openClients();
+  prisma = clients.prisma;
 
-  containers = [postgres, redisContainer, rabbitmq];
+  await assertTopology(clients.queue.channel, topology);
+  await recordInto(clients.queue.channel, topology.deliveryQueue, queued);
 
-  const databaseUrl = `postgresql://hooktracker:hooktracker@${postgres.getHost()}:${postgres.getMappedPort(5432)}/hooktracker?schema=public`;
+  project = await createProject(prisma, 'itest-api');
 
-  await run('npx', ['prisma', 'migrate', 'deploy'], {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    shell: true,
+  const otherProject = await createProject(prisma, 'itest-api-other');
+
+  activeEndpoint = await createEndpoint(prisma, {
+    projectId: project.id,
+    url: 'http://receiver:4000/ok',
+    eventTypes: ['order.*'],
   });
 
-  prisma = createPrismaClient({ connectionString: databaseUrl });
-  redis = createRedisClient({
-    url: `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`,
-  });
-  queue = await createQueueConnection({
-    url: `amqp://guest:guest@${rabbitmq.getHost()}:${rabbitmq.getMappedPort(5672)}`,
-    attempts: 10,
-    baseDelayMs: 250,
+  disabledEndpoint = await createEndpoint(prisma, {
+    projectId: project.id,
+    url: 'http://receiver:4000/fail-500',
+    eventTypes: ['order.*'],
+    status: 'DISABLED',
   });
 
-  await assertTopology(queue.channel, topology);
-  await queue.channel.consume(topology.deliveryQueue, (message) => {
-    if (!message) {
-      return;
-    }
-
-    queue.channel.ack(message);
-    queued.push(JSON.parse(message.content.toString('utf8')));
-  });
-
-  project = await prisma.project.create({
-    data: { id: newId('project'), name: 'Integration Project', slug: `itest-${Date.now()}` },
-  });
-
-  const otherProject = await prisma.project.create({
-    data: { id: newId('project'), name: 'Other Project', slug: `other-${Date.now()}` },
-  });
-
-  activeEndpoint = await prisma.endpoint.create({
-    data: {
-      id: newId('endpoint'),
-      projectId: project.id,
-      url: 'http://receiver:4000/ok',
-      secret: encryptSecret(generateEndpointSecret()),
-      eventTypes: ['order.*'],
-    },
-  });
-
-  disabledEndpoint = await prisma.endpoint.create({
-    data: {
-      id: newId('endpoint'),
-      projectId: project.id,
-      url: 'http://receiver:4000/fail-500',
-      secret: encryptSecret(generateEndpointSecret()),
-      eventTypes: ['order.*'],
-      status: 'DISABLED',
-    },
-  });
-
-  foreignEndpoint = await prisma.endpoint.create({
-    data: {
-      id: newId('endpoint'),
-      projectId: otherProject.id,
-      url: 'http://receiver:4000/ok',
-      secret: encryptSecret(generateEndpointSecret()),
-      eventTypes: [],
-    },
+  foreignEndpoint = await createEndpoint(prisma, {
+    projectId: otherProject.id,
+    url: 'http://receiver:4000/ok',
   });
 
   const app = createApp({
     prisma,
-    redis,
-    publisher: createPublisher({ channel: queue.channel, topology }),
-    connection: queue.connection,
-    logger: pino({ level: 'silent' }),
-    config: {
-      ...config,
-      NODE_ENV: 'test',
-      CORS_ORIGINS: [],
+    redis: clients.redis,
+    publisher: createPublisher({ channel: clients.queue.channel, topology }),
+    connection: clients.queue.connection,
+    logger: silentLogger(),
+    config: testConfig({
       RATE_LIMIT_PUBLISH_PER_MINUTE: RATE_LIMIT,
       MAX_PAYLOAD_BYTES,
-    },
+    }),
   });
 
   server = app.listen(0);
@@ -209,11 +115,7 @@ beforeEach(async () => {
 afterAll(async () => {
   server?.close();
 
-  await closeQuietly(queue?.channel);
-  await closeQuietly(queue?.connection);
-  await redis?.quit();
-  await prisma?.$disconnect();
-  await Promise.all(containers.map((container) => container.stop()));
+  await closeClients(clients);
 });
 
 describe('POST /v1/publish', () => {
@@ -256,14 +158,16 @@ describe('POST /v1/publish', () => {
     const headers = { 'idempotency-key': `key-${Date.now()}` };
 
     const first = await publish(request, { headers });
-    const before = await prisma.delivery.count();
+    const before = await prisma.delivery.count({ where: { event: { projectId: project.id } } });
     const second = await publish(request, { headers });
 
     expect(first.status).toBe(202);
     expect(second.status).toBe(202);
     expect(second.body).toEqual(first.body);
     expect(second.headers.get('idempotency-replayed')).toBe('true');
-    expect(await prisma.delivery.count()).toBe(before);
+    expect(await prisma.delivery.count({ where: { event: { projectId: project.id } } })).toBe(
+      before,
+    );
   });
 
   it('refuses an event type that nothing subscribes to', async () => {

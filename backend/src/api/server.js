@@ -1,5 +1,6 @@
 import { config } from '../shared/config.js';
 import { disconnectDatabase, prisma } from '../shared/db.js';
+import { closeServer, onShutdown } from '../shared/lifecycle.js';
 import { createLogger } from '../shared/logger.js';
 import { createQueueConnection } from '../shared/queue/connection.js';
 import { createPublisher } from '../shared/queue/publisher.js';
@@ -33,37 +34,14 @@ const server = app.listen(config.PORT, () => {
 
 const realtime = attachRealtime({ server, prisma, redis, config, logger });
 
-let shuttingDown = false;
-
-async function shutdown(signal) {
-  if (shuttingDown) {
-    return;
-  }
-
-  shuttingDown = true;
-
-  logger.info({ signal }, 'shutting down');
-
-  const timer = setTimeout(() => {
-    logger.warn({ graceMs: config.SHUTDOWN_GRACE_MS }, 'grace period elapsed, forcing exit');
-    process.exit(1);
-  }, config.SHUTDOWN_GRACE_MS);
-
-  timer.unref();
-
-  await realtime.close();
-
-  await new Promise((resolve) => {
-    server.close(resolve);
-  });
-
-  await queue.close();
-  await redis.quit();
-  await disconnectDatabase();
-
-  clearTimeout(timer);
-  process.exit(0);
-}
-
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+onShutdown({
+  logger,
+  graceMs: config.SHUTDOWN_GRACE_MS,
+  close: async () => {
+    await realtime.close();
+    await closeServer(server);
+    await queue.close();
+    await redis.quit();
+    await disconnectDatabase();
+  },
+});

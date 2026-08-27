@@ -1,32 +1,24 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import jwt from 'jsonwebtoken';
-import { pino } from 'pino';
 import { io as connectSocket } from 'socket.io-client';
-import { GenericContainer, Wait } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/api/app.js';
 import { attachRealtime } from '../../src/api/realtime/socket.js';
-import { config } from '../../src/shared/config.js';
-import { createPrismaClient } from '../../src/shared/db.js';
-import { newId } from '../../src/shared/ids.js';
-import { closeQuietly, createQueueConnection } from '../../src/shared/queue/connection.js';
 import { createPublisher } from '../../src/shared/queue/publisher.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { createRealtimePublisher } from '../../src/shared/realtime.js';
-import { createRedisClient } from '../../src/shared/redis.js';
-
-const run = promisify(execFile);
+import { newId } from '../../src/shared/ids.js';
+import { createEvent } from '../support/fixtures.js';
+import { wait } from '../support/poll.js';
+import { closeClients, openClients, silentLogger, testConfig } from '../support/stack.js';
 
 const REFRESH_COOKIE = 'ht_refresh';
 
 const topology = createTopology({ namespace: 'itest-dashboard' });
 
-const logger = pino({ level: 'silent' });
+const logger = silentLogger();
 
-let containers = [];
+let clients;
 let prisma;
-let redis;
 let queue;
 let realtime;
 let server;
@@ -35,19 +27,10 @@ let alice;
 let bob;
 let endpoint;
 
-const testConfig = {
-  ...config,
-  NODE_ENV: 'test',
-  CORS_ORIGINS: [],
+const appConfig = testConfig({
   SSRF_ALLOWLIST_HOSTS: ['localhost'],
   REALTIME_MAX_EVENTS_PER_SECOND: 50,
-};
-
-async function wait(ms) {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
+});
 
 async function call(method, path, { token, body, cookie } = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -109,56 +92,18 @@ async function openSocket(token) {
 }
 
 beforeAll(async () => {
-  const [postgres, redisContainer, rabbitmq] = await Promise.all([
-    new GenericContainer('postgres:17-alpine')
-      .withEnvironment({
-        POSTGRES_USER: 'hooktracker',
-        POSTGRES_PASSWORD: 'hooktracker',
-        POSTGRES_DB: 'hooktracker',
-      })
-      .withExposedPorts(5432)
-      .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
-      .withStartupTimeout(180_000)
-      .start(),
-    new GenericContainer('redis:8-alpine')
-      .withExposedPorts(6379)
-      .withWaitStrategy(Wait.forLogMessage(/Ready to accept connections/))
-      .withStartupTimeout(180_000)
-      .start(),
-    new GenericContainer('rabbitmq:4-management-alpine')
-      .withExposedPorts(5672)
-      .withWaitStrategy(Wait.forLogMessage(/Server startup complete/))
-      .withStartupTimeout(180_000)
-      .start(),
-  ]);
-
-  containers = [postgres, redisContainer, rabbitmq];
-
-  const databaseUrl = `postgresql://hooktracker:hooktracker@${postgres.getHost()}:${postgres.getMappedPort(5432)}/hooktracker?schema=public`;
-
-  await run('npx', ['prisma', 'migrate', 'deploy'], {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    shell: true,
-  });
-
-  prisma = createPrismaClient({ connectionString: databaseUrl });
-  redis = createRedisClient({
-    url: `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`,
-  });
-  queue = await createQueueConnection({
-    url: `amqp://guest:guest@${rabbitmq.getHost()}:${rabbitmq.getMappedPort(5672)}`,
-    attempts: 10,
-    baseDelayMs: 250,
-  });
+  clients = await openClients();
+  prisma = clients.prisma;
+  queue = clients.queue;
 
   await assertTopology(queue.channel, topology);
 
   const app = createApp({
     prisma,
-    redis,
+    redis: clients.redis,
     publisher: createPublisher({ channel: queue.channel, topology }),
     connection: queue.connection,
-    config: testConfig,
+    config: appConfig,
     logger,
   });
 
@@ -170,7 +115,7 @@ beforeAll(async () => {
 
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 
-  realtime = attachRealtime({ server, prisma, redis, config: testConfig, logger });
+  realtime = attachRealtime({ server, prisma, redis: clients.redis, config: appConfig, logger });
 
   alice = await register('alice@hook-tracker.test', 'Alice Project');
   bob = await register('bob@hook-tracker.test', 'Bob Project');
@@ -181,11 +126,7 @@ afterAll(async () => {
 
   server?.close();
 
-  await closeQuietly(queue?.channel);
-  await closeQuietly(queue?.connection);
-  await redis?.quit();
-  await prisma?.$disconnect();
-  await Promise.all(containers.map((container) => container.stop()));
+  await closeClients(clients);
 });
 
 describe('authentication', () => {
@@ -388,14 +329,10 @@ describe('deliveries', () => {
   let deliveries;
 
   beforeAll(async () => {
-    const event = await prisma.webhookEvent.create({
-      data: {
-        id: newId('event'),
-        projectId: alice.project.id,
-        eventType: 'order.paid',
-        payload: { orderId: 99 },
-        idempotencyKey: newId('event'),
-      },
+    const event = await createEvent(prisma, {
+      projectId: alice.project.id,
+      eventType: 'order.paid',
+      payload: { orderId: 99 },
     });
 
     deliveries = [];
@@ -518,7 +455,7 @@ describe('deliveries', () => {
 
 describe('realtime', () => {
   it('delivers a project event to that project only', async () => {
-    const publisher = createRealtimePublisher({ redis });
+    const publisher = createRealtimePublisher({ redis: clients.redis });
     const aliceSocket = await openSocket(alice.token);
     const bobSocket = await openSocket(bob.token);
 
@@ -547,10 +484,10 @@ describe('realtime', () => {
   it('delivers exactly one copy while a second API instance is running', async () => {
     const secondApp = createApp({
       prisma,
-      redis,
+      redis: clients.redis,
       publisher: createPublisher({ channel: queue.channel, topology }),
       connection: queue.connection,
-      config: testConfig,
+      config: appConfig,
       logger,
     });
 
@@ -563,8 +500,8 @@ describe('realtime', () => {
     const secondRealtime = attachRealtime({
       server: secondServer,
       prisma,
-      redis,
-      config: testConfig,
+      redis: clients.redis,
+      config: appConfig,
       logger,
     });
 
@@ -585,7 +522,7 @@ describe('realtime', () => {
     });
 
     try {
-      await createRealtimePublisher({ redis }).emit({
+      await createRealtimePublisher({ redis: clients.redis }).emit({
         projectId: alice.project.id,
         event: 'delivery.succeeded',
         payload: { deliveryId: 'dlv_two_instances', attempt: 1 },
@@ -620,7 +557,7 @@ describe('realtime', () => {
   });
 
   it('disconnects a socket when the access token it opened with expires', async () => {
-    const shortLived = jwt.sign({ sub: alice.user.id }, testConfig.JWT_SECRET, { expiresIn: '2s' });
+    const shortLived = jwt.sign({ sub: alice.user.id }, appConfig.JWT_SECRET, { expiresIn: '2s' });
     const { socket } = await openSocket(shortLived);
 
     const reason = await new Promise((resolve) => {

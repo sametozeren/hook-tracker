@@ -18,7 +18,12 @@ export function createProjectService({ prisma }) {
         memberships.map((membership) => [membership.projectId, membership.role]),
       );
 
-      return projects.map((project) => ({ ...projectView(project), role: roleOf.get(project.id) }));
+      return {
+        projects: projects.map((project) => ({
+          ...projectView(project),
+          role: roleOf.get(project.id),
+        })),
+      };
     },
 
     async create({ userId, name }) {
@@ -45,13 +50,15 @@ export function createProjectService({ prisma }) {
         orderBy: { createdAt: 'asc' },
       });
 
-      return memberships.map((membership) => ({
-        userId: membership.userId,
-        email: membership.user.email,
-        name: membership.user.name,
-        role: membership.role,
-        joinedAt: membership.createdAt,
-      }));
+      return {
+        members: memberships.map((membership) => ({
+          userId: membership.userId,
+          email: membership.user.email,
+          name: membership.user.name,
+          role: membership.role,
+          joinedAt: membership.createdAt,
+        })),
+      };
     },
 
     // v1 has no invitation flow, so a member must already have an account. The

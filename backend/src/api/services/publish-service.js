@@ -1,3 +1,4 @@
+import { DELIVERY_STATUS, ENDPOINT_STATUS } from '../../shared/delivery-status.js';
 import { UnprocessableError } from '../../shared/errors.js';
 import { subscriptionMatches } from '../../shared/event-types.js';
 import { newId } from '../../shared/ids.js';
@@ -44,7 +45,10 @@ export function createPublishService({ prisma, publisher, logger }) {
         id: newId('delivery'),
         eventId,
         endpointId: endpoint.id,
-        status: endpoint.status === 'ACTIVE' ? 'PENDING' : 'SKIPPED',
+        status:
+          endpoint.status === ENDPOINT_STATUS.ACTIVE
+            ? DELIVERY_STATUS.PENDING
+            : DELIVERY_STATUS.SKIPPED,
       }));
 
       await prisma.$transaction([
@@ -54,7 +58,7 @@ export function createPublishService({ prisma, publisher, logger }) {
         prisma.delivery.createMany({ data: deliveries }),
       ]);
 
-      const queued = deliveries.filter((delivery) => delivery.status === 'PENDING');
+      const queued = deliveries.filter((delivery) => delivery.status === DELIVERY_STATUS.PENDING);
 
       for (const delivery of queued) {
         await publisher.publishDelivery({ deliveryId: delivery.id, attempt: 1 });

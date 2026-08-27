@@ -1,9 +1,8 @@
+import { REPLAYABLE_STATUSES } from '../../shared/delivery-status.js';
 import { NotFoundError } from '../../shared/errors.js';
 import { newId } from '../../shared/ids.js';
 import { assertMembership } from '../authorization.js';
 import { decodeCursor, olderThan, paginate } from './keyset.js';
-
-const REPLAYABLE_FROM = new Set(['SUCCEEDED', 'FAILED_PERMANENTLY', 'SKIPPED', 'RETRYING']);
 
 function deliveryView(delivery) {
   return {
@@ -135,7 +134,7 @@ export function createDeliveryService({ prisma, publisher, config, logger }) {
         take: limit,
       });
 
-      const replayable = originals.filter((delivery) => REPLAYABLE_FROM.has(delivery.status));
+      const replayable = originals.filter((delivery) => REPLAYABLE_STATUSES.has(delivery.status));
 
       const replays = replayable.map((original) => ({
         id: newId('delivery'),

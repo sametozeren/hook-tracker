@@ -1,5 +1,6 @@
 import { config } from '../shared/config.js';
 import { disconnectDatabase, prisma } from '../shared/db.js';
+import { onShutdown } from '../shared/lifecycle.js';
 import { createLogger } from '../shared/logger.js';
 import { createQueueConnection } from '../shared/queue/connection.js';
 import { createPublisher } from '../shared/queue/publisher.js';
@@ -10,6 +11,8 @@ import { createTokenBucket } from '../shared/token-bucket.js';
 import { createDeliveryHandler } from './handle-delivery.js';
 
 const DRAIN_POLL_MS = 50;
+
+const DRAIN_SHARE = 0.8;
 
 const logger = createLogger('worker');
 
@@ -34,7 +37,6 @@ const handleDelivery = createDeliveryHandler({
 });
 
 let inFlight = 0;
-let shuttingDown = false;
 
 const { consumerTag } = await queue.channel.consume(topology.deliveryQueue, async (message) => {
   if (!message) {
@@ -88,33 +90,26 @@ async function drain(deadline) {
   }
 }
 
-async function shutdown(signal) {
-  if (shuttingDown) {
-    return;
-  }
+onShutdown({
+  logger,
+  graceMs: config.SHUTDOWN_GRACE_MS,
+  close: async () => {
+    try {
+      await queue.channel.cancel(consumerTag);
+    } catch (error) {
+      logger.warn({ reason: error.message }, 'cancelling the consumer failed');
+    }
 
-  shuttingDown = true;
+    // The drain gets a share of the grace period rather than all of it: the
+    // closes below still need room before the force-exit timer fires.
+    await drain(Date.now() + config.SHUTDOWN_GRACE_MS * DRAIN_SHARE);
 
-  logger.info({ signal, inFlight }, 'shutting down');
+    if (inFlight > 0) {
+      logger.warn({ inFlight }, 'grace period elapsed with attempts still in flight');
+    }
 
-  try {
-    await queue.channel.cancel(consumerTag);
-  } catch (error) {
-    logger.warn({ reason: error.message }, 'cancelling the consumer failed');
-  }
-
-  await drain(Date.now() + config.SHUTDOWN_GRACE_MS);
-
-  if (inFlight > 0) {
-    logger.warn({ inFlight }, 'grace period elapsed with attempts still in flight');
-  }
-
-  await queue.close();
-  await redis.quit();
-  await disconnectDatabase();
-
-  process.exit(0);
-}
-
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+    await queue.close();
+    await redis.quit();
+    await disconnectDatabase();
+  },
+});

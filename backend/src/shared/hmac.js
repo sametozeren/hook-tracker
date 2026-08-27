@@ -3,6 +3,18 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export const SIGNATURE_VERSION = 'v1';
 export const TIMESTAMP_TOLERANCE_SECONDS = 300;
 
+// The wire contract, named once: the worker writes these and the receiving side
+// reads them back. Renaming one here renames it on both sides at the same time.
+export const WEBHOOK_HEADERS = Object.freeze({
+  id: 'x-webhook-id',
+  event: 'x-webhook-event',
+  attempt: 'x-webhook-attempt',
+  timestamp: 'x-webhook-timestamp',
+  signature: 'x-webhook-signature',
+});
+
+export const WEBHOOK_USER_AGENT = 'HookTracker/1.0';
+
 function bodyBuffer(rawBody) {
   return Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
 }
