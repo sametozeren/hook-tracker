@@ -8,3 +8,159 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+enum EndpointStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DeliveryStatus {
+  PENDING
+  IN_FLIGHT
+  RETRYING
+  SUCCEEDED
+  FAILED_PERMANENTLY
+  SKIPPED
+}
+
+model User {
+  id           String   @id
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Project {
+  id        String   @id
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  memberships Membership[]
+  apiKeys     ApiKey[]
+  endpoints   Endpoint[]
+  events      WebhookEvent[]
+
+  @@map("projects")
+}
+
+model Membership {
+  userId    String
+  projectId String
+  role      Role     @default(MEMBER)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([userId, projectId])
+  @@index([projectId])
+  @@map("memberships")
+}
+
+model ApiKey {
+  id         String    @id
+  projectId  String
+  name       String
+  keyPrefix  String    @unique
+  keyHash    String
+  lastUsedAt DateTime? @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("api_keys")
+}
+
+model Endpoint {
+  id                  String         @id
+  projectId           String
+  url                 String
+  description         String?
+  status              EndpointStatus @default(ACTIVE)
+  secret              String
+  previousSecret      String?
+  secretRotatedAt     DateTime?      @db.Timestamptz(3)
+  eventTypes          String[]       @default([])
+  rateLimitPerMinute  Int            @default(600)
+  consecutiveFailures Int            @default(0)
+  createdAt           DateTime       @default(now()) @db.Timestamptz(3)
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliveries Delivery[]
+
+  @@index([projectId])
+  @@map("endpoints")
+}
+
+model WebhookEvent {
+  id             String   @id
+  projectId      String
+  eventType      String
+  payload        Json
+  idempotencyKey String
+  receivedAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliveries Delivery[]
+
+  @@index([projectId, receivedAt(sort: Desc)])
+  @@map("webhook_events")
+}
+
+model Delivery {
+  id             String         @id
+  eventId        String
+  endpointId     String
+  status         DeliveryStatus @default(PENDING)
+  attemptCount   Int            @default(0)
+  nextAttemptAt  DateTime?      @db.Timestamptz(3)
+  lastError      String?
+  completedAt    DateTime?      @db.Timestamptz(3)
+  replayedFromId String?
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+
+  event    WebhookEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  endpoint Endpoint     @relation(fields: [endpointId], references: [id], onDelete: Restrict)
+
+  replayedFrom Delivery?  @relation("DeliveryReplay", fields: [replayedFromId], references: [id], onDelete: SetNull)
+  replays      Delivery[] @relation("DeliveryReplay")
+
+  attempts DeliveryAttempt[]
+
+  @@index([endpointId, createdAt(sort: Desc)])
+  @@index([status, nextAttemptAt])
+  @@index([eventId])
+  @@index([replayedFromId])
+  @@map("deliveries")
+}
+
+model DeliveryAttempt {
+  id                  String   @id
+  deliveryId          String
+  attemptNumber       Int
+  responseStatus      Int?
+  responseHeaders     Json?
+  responseBodySnippet String?
+  durationMs          Int?
+  errorCode           String?
+  errorMessage        String?
+  startedAt           DateTime @default(now()) @db.Timestamptz(3)
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@index([deliveryId, attemptNumber])
+  @@map("delivery_attempts")
+}

@@ -87,6 +87,28 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Demo target for the bundled seed data. No host port: the stack only reaches
+  # it over the Docker network, which is also what SSRF_ALLOWLIST_HOSTS permits.
+  receiver:
+    build:
+      context: ./backend
+    command: ['node', 'src/demo-receiver/server.js']
+    env_file:
+      - .env
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
   dashboard:
     build:
       context: ./dashboard

@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phase 0 complete, acceptance check run and observed. Phase 1 next. Last updated 2026-08-26.
+**Status:** Phase 1 complete, acceptance check run and observed. Phase 2 next. Last updated 2026-08-27.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -23,7 +23,7 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 | Risk | Phase | Handling |
 |---|---|---|
-| Prisma client generation and import paths under ESM need extra configuration | 1 | Generate to a fixed path, import only through `shared/db.js`, and prove it with a one-line smoke script before anything is built on top |
+| Prisma client generation and import paths under ESM need extra configuration | 1 | Resolved: the v7 `prisma-client` generator emits TypeScript into `src/generated/prisma`, which Node 24 runs directly through type stripping, and v7 requires a driver adapter (`@prisma/adapter-pg`). Both are contained in `shared/db.js`, the only module that imports the generated client. A Node older than 24 cannot run the client without `--experimental-strip-types`, which is why `engines` pins 24 |
 | RabbitMQ queue arguments are immutable — a wrong TTL yields `PRECONDITION_FAILED` on restart | 2 | A `queue:reset` dev script that deletes and redeclares; never pointed at a queue holding messages |
 | Testcontainers on Windows and Docker Desktop: slow starts, socket path configuration | 2 | First integration test is a hello-world container to isolate environment problems from code problems; enable container reuse so the suite does not restart brokers per file; remember CI runs Linux, so a local-only failure is an environment finding |
 | Connecting to a pinned IP while keeping TLS valid | 4 | A custom `undici` Agent whose lookup returns the verified address, with SNI and the `Host` header still carrying the original hostname — otherwise certificate validation fails |
@@ -46,12 +46,15 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 1 — Data layer
 
-- [ ] `backend/prisma/schema.prisma` — every model, enum, index and cascade rule from architecture §11
-- [ ] Initial migration committed
-- [ ] `backend/src/shared/ids.js` — prefixed cuid2 helper
-- [ ] `backend/src/shared/crypto.js` — argon2id hashing, AES-256-GCM secret encryption, constant-time compare
-- [ ] `backend/prisma/seed.js` — demo user, project, API key, endpoint pointing at the receiver
-- [ ] `backend/src/demo-receiver/server.js` — the routes from architecture §2.2
+- [x] `backend/prisma/schema.prisma` — every model, enum, index and cascade rule from architecture §11
+- [x] Initial migration committed
+- [x] `backend/src/shared/ids.js` — prefixed cuid2 helper
+- [x] `backend/src/shared/crypto.js` — argon2id hashing, AES-256-GCM secret encryption, constant-time compare
+- [x] `backend/prisma/seed.js` — demo user, project, API key, endpoint pointing at the receiver
+- [x] `backend/src/demo-receiver/server.js` — the routes from architecture §2.2
+- [x] `backend/src/shared/db.js` — driver adapter, the single import site of the generated client
+- [x] `backend/src/shared/hmac.js` — pulled forward from phase 4, because the receiver verifies signatures and the signing function may exist only once
+- [x] `receiver` service in `docker-compose.yml`, without a host port
 
 **Acceptance:** `migrate deploy` runs clean on an empty database; `npm run seed` produces the demo records; the receiver answers each of its routes as specified.
 
@@ -78,7 +81,7 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 4 — Delivery worker
 
-- [ ] `backend/src/shared/hmac.js` — signing, including the rotation overlap
+- [x] `backend/src/shared/hmac.js` — signing, including the rotation overlap (delivered in phase 1)
 - [ ] `backend/src/shared/ssrf.js` — DNS resolution, range checks, IP pinning, allowlist
 - [ ] HTTP client with split timeouts and no redirect following
 - [ ] Attempt handler: response capture, transactional attempt row + status update, then ack

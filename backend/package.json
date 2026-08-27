@@ -21,9 +21,13 @@
     "test:integration": "vitest run --dir tests/integration"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.1.0",
+    "@paralleldrive/cuid2": "^3.3.0",
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "pg": "^8.23.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "prisma": "^7.10.0",

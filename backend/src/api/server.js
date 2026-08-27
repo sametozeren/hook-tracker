@@ -6,6 +6,7 @@ import { createLogger, REDACTION_PATHS } from '../shared/logger.js';
 const logger = createLogger('api');
 
 const app = express();
+
 app.disable('x-powered-by');
 app.use(pinoHttp({ logger, redact: { paths: REDACTION_PATHS, censor: '[redacted]' } }));
 
@@ -19,10 +20,12 @@ const server = app.listen(config.PORT, () => {
 
 function shutdown(signal) {
   logger.info({ signal }, 'shutting down');
+
   const timer = setTimeout(() => {
     logger.warn({ graceMs: config.SHUTDOWN_GRACE_MS }, 'grace period elapsed, forcing exit');
     process.exit(1);
   }, config.SHUTDOWN_GRACE_MS);
+
   timer.unref();
 
   server.close(() => {

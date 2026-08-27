@@ -1,11 +1,15 @@
 # Project: hook-tracker — Webhook Gateway & Retry Engine
 
 ## Mandatory Pre-requisite
-- Before writing any code, planning tasks, or answering questions, thoroughly read **`docs/architecture.md`**, **`docs/api.md`**, **`docs/guidelines.md`** and **`docs/dashboard.md`**. Follow the phase order in **`docs/implementation-plan.md`**. All implementations must strictly align with the data flow, queue mechanisms, and entity models defined in those documents.
+- Before writing any code, planning tasks, or answering questions, thoroughly read **`docs/architecture.md`**, **`docs/api.md`**, **`docs/guidelines.md`**, **`docs/dashboard.md`** and **`docs/code-review.md`**. Follow the phase order in **`docs/implementation-plan.md`**. All implementations must strictly align with the data flow, queue mechanisms, and entity models defined in those documents.
 
 ## Core Constraints
 - **Git Operations are STRICTLY FORBIDDEN:** Under no circumstances should you execute `git commit`, `git push`, `git pull`, `git checkout`, branch creations, or any Git command. Version control is handled entirely and manually by the user.
 - **Module System (ESM):** All Node.js packages must use ECMAScript Modules (ESM) standard (`"type": "module"`). Use `import/export` syntax instead of `require`.
+
+## Code Review Rules
+- **`docs/code-review.md` is binding.** Apply its CR rules while writing code, and check the changed files against them again before reporting a change as complete. Report a finding as `CR-<n>, <file>:<line>`.
+- Rules that a linter can enforce are enforced there rather than by review; `npm run lint` must be clean in both packages.
 
 ## Commenting Standards
 - Do not add comments by default. Prioritize readable code, expressive naming, and small single-purpose functions.

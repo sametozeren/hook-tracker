@@ -34,7 +34,7 @@
 ## Code Standards
 - Use modern JavaScript (ES6+) and native ESM syntax.
 - Handle asynchronous control flow using `async/await`; keep `try/catch` scopes tight and intentional.
-- ESLint + Prettier are authoritative; formatting is not discussed in review.
+- ESLint + Prettier are authoritative; formatting is not discussed in review. The blank-line rules a reviewer would otherwise argue about are stated in `docs/code-review.md` (CR-1) and enforced by a lint rule.
 - Node version is pinned in `engines` and `.nvmrc`, and matches the Docker base image.
 - Follow the commenting rules defined in `CLAUDE.md` without exception.
 

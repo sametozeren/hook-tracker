@@ -209,7 +209,7 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 
 ```text
 User            id, email (unique), passwordHash (argon2id), name, createdAt
-Membership      userId, projectId, role: OWNER | MEMBER        @@unique([userId, projectId])
+Membership      userId, projectId, role: OWNER | MEMBER        @@id([userId, projectId])
 Project         id, name, slug (unique), createdAt
 ApiKey          id, projectId, name, keyPrefix (unique, indexed), keyHash (sha256),
                 lastUsedAt, revokedAt, createdAt
@@ -224,14 +224,23 @@ Delivery        id, eventId, endpointId, status: PENDING | IN_FLIGHT | RETRYING 
                 replayedFromId, createdAt
                 @@index([endpointId, createdAt(sort: Desc)])
                 @@index([status, nextAttemptAt])
+                @@index([eventId])  @@index([replayedFromId])
 DeliveryAttempt id, deliveryId, attemptNumber, responseStatus, responseHeaders Jsonb,
                 responseBodySnippet (8 KB max), durationMs, errorCode, errorMessage, startedAt
                 @@index([deliveryId, attemptNumber])
 ```
 
+Foreign keys that no list view filters on still carry an index, because a cascade delete and a restrict check both scan the child table.
+
+`Endpoint.rateLimitPerMinute` defaults to 600 — high enough that a fresh endpoint is never throttled by surprise, low enough to stay a real ceiling.
+
 API keys are stored hashed and the plaintext is shown exactly once at creation; `keyPrefix` (the first 8 characters after the `ht_` marker) is the lookup index. Endpoint secrets are encrypted at rest with `SECRET_ENCRYPTION_KEY` (AES-256-GCM).
 
 Every dashboard query is scoped by a `projectId` derived from the membership set in the JWT, never from a client-supplied parameter.
+
+`Membership` is the one table with no surrogate key: the pair it joins is already unique, and there is no id prefix for a row that is never addressed on its own.
+
+**Client generation.** The Prisma v7 `prisma-client` generator writes TypeScript into `backend/src/generated/prisma`, which is git-ignored and regenerated during the image build. Node 24 runs it through type stripping, so no build step is added for a JavaScript codebase. v7 also requires a driver adapter — `@prisma/adapter-pg` over `pg`. Both details live in `shared/db.js`, the only module that imports the generated client.
 
 **Identifiers.** Primary keys are `cuid2` values carrying a type prefix, generated in the application layer by a single `shared/ids.js` helper: `usr_`, `prj_`, `key_`, `ep_`, `evt_`, `dlv_`, `att_`. The prefix makes an id self-describing in logs, dashboards and support requests, and makes a wrong-entity lookup fail loudly instead of silently returning nothing.
 
