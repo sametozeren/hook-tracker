@@ -10,6 +10,7 @@ export const ID_PREFIXES = Object.freeze({
   event: 'evt',
   delivery: 'dlv',
   attempt: 'att',
+  refreshToken: 'rt',
 });
 
 const PREFIX_PATTERN = /^([a-z]+)_([0-9a-z]{24})$/;

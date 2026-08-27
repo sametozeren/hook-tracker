@@ -35,7 +35,8 @@ model User {
   name         String
   createdAt    DateTime @default(now()) @db.Timestamptz(3)
 
-  memberships Membership[]
+  memberships   Membership[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
 }
@@ -163,4 +164,18 @@ model DeliveryAttempt {
 
   @@index([deliveryId, attemptNumber])
   @@map("delivery_attempts")
+}
+
+model RefreshToken {
+  id        String    @id
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
 }

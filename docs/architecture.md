@@ -237,6 +237,8 @@ Delivery        id, eventId, endpointId, status: PENDING | IN_FLIGHT | RETRYING 
                 @@index([endpointId, createdAt(sort: Desc)])
                 @@index([status, nextAttemptAt])
                 @@index([eventId])  @@index([replayedFromId])
+RefreshToken    id, userId, tokenHash (unique), expiresAt, revokedAt, createdAt
+                @@index([userId])
 DeliveryAttempt id, deliveryId, attemptNumber, responseStatus, responseHeaders Jsonb,
                 responseBodySnippet (8 KB max), durationMs, errorCode, errorMessage, startedAt
                 @@index([deliveryId, attemptNumber])
@@ -254,7 +256,7 @@ Every dashboard query is scoped by a `projectId` derived from the membership set
 
 **Client generation.** The Prisma v7 `prisma-client` generator writes TypeScript into `backend/src/generated/prisma`, which is git-ignored and regenerated during the image build. Node 24 runs it through type stripping, so no build step is added for a JavaScript codebase. v7 also requires a driver adapter — `@prisma/adapter-pg` over `pg`. Both details live in `shared/db.js`, the only module that imports the generated client.
 
-**Identifiers.** Primary keys are `cuid2` values carrying a type prefix, generated in the application layer by a single `shared/ids.js` helper: `usr_`, `prj_`, `key_`, `ep_`, `evt_`, `dlv_`, `att_`. The prefix makes an id self-describing in logs, dashboards and support requests, and makes a wrong-entity lookup fail loudly instead of silently returning nothing.
+**Identifiers.** Primary keys are `cuid2` values carrying a type prefix, generated in the application layer by a single `shared/ids.js` helper: `usr_`, `prj_`, `key_`, `ep_`, `evt_`, `dlv_`, `att_`, `rt_`. The prefix makes an id self-describing in logs, dashboards and support requests, and makes a wrong-entity lookup fail loudly instead of silently returning nothing.
 
 **Time.** Every timestamp column is `timestamptz` and every value is stored in UTC. Conversion to a local zone happens in the dashboard only, and `from` / `to` filters are accepted as ISO-8601 with an explicit offset.
 
@@ -264,7 +266,9 @@ Every dashboard query is scoped by a `projectId` derived from the membership set
 
 * **Dashboard users:** email and password (argon2id). The access token is a 1-hour JWT returned in the response body; the refresh token is a 7-day opaque token in an `HttpOnly; SameSite=Strict` cookie, rotated on each use and revocable server-side.
 * **Ingestion clients:** `Authorization: Bearer ht_<key>`. Lookup by prefix, verification by constant-time hash comparison, rejection when `revokedAt` is set.
-* Authorization is membership-based. `OWNER` manages members, API keys and endpoint secrets; `MEMBER` has read access plus replay.
+* Authorization is membership-based. `OWNER` manages members, API keys and endpoint secrets; `MEMBER` has read access plus replay. The membership set is read from the database on every request rather than carried inside the access token, so removing someone takes effect at once instead of when their token happens to expire.
+* Refresh tokens are stored as a sha256 hash in `RefreshToken`, never in plaintext. Using one revokes it as the replacement is issued, so a stolen token works at most once — and its use logs the legitimate client out, which is what makes the theft visible.
+* Registering creates the user, a project and an `OWNER` membership in one transaction. Adding a member requires an account that already exists; v1 has no invitation flow and says so with `422` rather than pretending.
 
 **Cookie flags.** The refresh cookie is `HttpOnly`, `SameSite=Strict`, `Path=/v1/auth`, and `Secure` whenever `NODE_ENV=production`. `Secure` is off in local development because the compose stack serves plain HTTP on localhost and a `Secure` cookie would never be stored there — a first-run failure that reads as a broken login.
 
@@ -286,7 +290,7 @@ endpoint.disabled   { endpointId, consecutiveFailures, disabledAt }
 ```
 
   Payloads carry ids, never the webhook body or any secret; the dashboard fetches detail over the API when a row is opened.
-* Workers hold no sockets. They publish to the Redis channel `realtime:{projectId}` as `{ event, payload }`, and API instances fan out through `@socket.io/redis-adapter`, which is also what makes multiple API replicas correct. A realtime publish that fails is logged and dropped: it must never fail a delivery that already committed.
+* Workers hold no sockets. They publish to the Redis channel `realtime:{projectId}` as `{ event, payload }`, and API instances fan out through `@socket.io/redis-adapter`, which is also what makes multiple API replicas correct. A realtime publish that fails is logged and dropped: it must never fail a delivery that already committed. Each API instance subscribes to that channel itself and emits to its **local** sockets only — pub/sub already delivered the message to every instance, so emitting through the adapter would send one copy per replica. The adapter stays in place for emits that originate inside one API instance.
 * Emissions are throttled per project (`REALTIME_MAX_EVENTS_PER_SECOND`) so a burst cannot drown the dashboard.
 * A socket outlives the 1-hour access token that opened it. The server records each connection's token expiry and disconnects it with a `token_expired` reason at that moment; the client refreshes and reconnects. Sockets are not left authenticated indefinitely, and revoking a session takes effect within the access token's remaining life rather than never.
 

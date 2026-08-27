@@ -1,3 +1,4 @@
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
@@ -6,13 +7,27 @@ import { REDACTION_PATHS } from '../shared/logger.js';
 import { createApiKeyAuth } from './middleware/api-key-auth.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createIdempotency } from './middleware/idempotency.js';
+import { createJwtAuth } from './middleware/jwt-auth.js';
 import { createRateLimiter } from './middleware/rate-limit.js';
 import { requestId } from './middleware/request-id.js';
+import { createAuthRouter } from './routes/auth.js';
+import { createDeliveryRouter } from './routes/deliveries.js';
+import { createEndpointRouter } from './routes/endpoints.js';
 import { createHealthRouter } from './routes/health.js';
+import { createProjectRouter } from './routes/projects.js';
 import { createPublishRouter } from './routes/publish.js';
+import { createApiKeyService } from './services/api-key-service.js';
+import { createAuthService } from './services/auth-service.js';
+import { createDeliveryService } from './services/delivery-service.js';
+import { createEndpointService } from './services/endpoint-service.js';
+import { createProjectService } from './services/project-service.js';
 import { createPublishService } from './services/publish-service.js';
 
 const HSTS_MAX_AGE_SECONDS = 15_552_000;
+
+// Stricter than ingestion and counted per IP rather than per key: these routes
+// are where credential stuffing would be attempted, and the attacker has no key.
+const AUTH_ATTEMPTS_PER_MINUTE = 20;
 
 export function createApp({ prisma, redis, publisher, connection, config, logger }) {
   const app = express();
@@ -45,16 +60,44 @@ export function createApp({ prisma, redis, publisher, connection, config, logger
   app.use(createHealthRouter({ prisma, redis, connection }));
 
   const publishService = createPublishService({ prisma, publisher, logger });
+  const authService = createAuthService({ prisma, config });
+  const projectService = createProjectService({ prisma });
+  const apiKeyService = createApiKeyService({ prisma });
+  const endpointService = createEndpointService({ prisma, config, publishService });
+  const deliveryService = createDeliveryService({ prisma, publisher, config, logger });
+
+  const jwtAuth = createJwtAuth({ prisma, config });
 
   app.use(
     '/v1',
     express.json({ limit: config.MAX_PAYLOAD_BYTES }),
+    cookieParser(),
     createPublishRouter({
       publishService,
       apiKeyAuth: createApiKeyAuth({ prisma }),
       rateLimit: createRateLimiter({ redis, limit: config.RATE_LIMIT_PUBLISH_PER_MINUTE }),
       idempotency: createIdempotency({ redis, ttlSeconds: config.IDEMPOTENCY_TTL_SECONDS }),
     }),
+    createAuthRouter({
+      authService,
+      config,
+      jwtAuth,
+      authRateLimit: createRateLimiter({
+        redis,
+        limit: AUTH_ATTEMPTS_PER_MINUTE,
+        keyPrefix: 'ratelimit:auth',
+        identify: (req) => req.ip,
+      }),
+    }),
+    createProjectRouter({
+      projectService,
+      apiKeyService,
+      endpointService,
+      deliveryService,
+      jwtAuth,
+    }),
+    createEndpointRouter({ endpointService, jwtAuth }),
+    createDeliveryRouter({ deliveryService, jwtAuth }),
   );
 
   app.use(notFoundHandler);

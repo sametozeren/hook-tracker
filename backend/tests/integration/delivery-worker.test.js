@@ -38,8 +38,8 @@ const topology = createTopology({
 const handlerConfig = {
   ...config,
   MAX_ATTEMPTS: 6,
-  DELIVERY_CONNECT_TIMEOUT_MS: 200,
-  DELIVERY_TIMEOUT_MS: 250,
+  DELIVERY_CONNECT_TIMEOUT_MS: 800,
+  DELIVERY_TIMEOUT_MS: 1500,
   RESPONSE_SNIPPET_BYTES: 8192,
   SSRF_ALLOW_PRIVATE: false,
   SSRF_ALLOWLIST_HOSTS: ['localhost'],
@@ -335,17 +335,24 @@ describe('retry ladder', () => {
   });
 
   it('times out a slow endpoint and retries it', async () => {
-    const endpoint = await createEndpoint({ url: `${RECEIVER_URL}/slow?ms=800` });
-    const created = await createDelivery(endpoint);
+    // Only this test needs a budget shorter than the receiver's delay.
+    handlerConfig.DELIVERY_TIMEOUT_MS = 300;
 
-    await publisher.publishDelivery({ deliveryId: created.id, attempt: 1 });
+    try {
+      const endpoint = await createEndpoint({ url: `${RECEIVER_URL}/slow?ms=800` });
+      const created = await createDelivery(endpoint);
 
-    const delivery = await waitForStatus(created.id, 'FAILED_PERMANENTLY');
+      await publisher.publishDelivery({ deliveryId: created.id, attempt: 1 });
 
-    expect(delivery.attempts).toHaveLength(6);
-    expect(delivery.attempts.every((attempt) => attempt.errorCode === 'TIMEOUT')).toBe(true);
-    expect(delivery.attempts[0].responseStatus).toBeNull();
-    expect(delivery.attempts[0].durationMs).toBeGreaterThanOrEqual(200);
+      const delivery = await waitForStatus(created.id, 'FAILED_PERMANENTLY');
+
+      expect(delivery.attempts).toHaveLength(6);
+      expect(delivery.attempts.every((attempt) => attempt.errorCode === 'TIMEOUT')).toBe(true);
+      expect(delivery.attempts[0].responseStatus).toBeNull();
+      expect(delivery.attempts[0].durationMs).toBeGreaterThanOrEqual(200);
+    } finally {
+      handlerConfig.DELIVERY_TIMEOUT_MS = 1500;
+    }
   });
 });
 

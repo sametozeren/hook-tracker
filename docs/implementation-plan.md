@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phase 4 complete, acceptance check run and observed. Phase 5 next. Last updated 2026-08-27.
+**Status:** Phase 5 complete, acceptance check run and observed. Phase 6 next. Last updated 2026-08-27.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -27,7 +27,7 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 | RabbitMQ queue arguments are immutable — a wrong TTL yields `PRECONDITION_FAILED` on restart | 2 | Resolved: `npm run queue:reset` inspects every queue first and refuses to delete one that still holds messages unless `--force` is passed; it also refuses to run with `NODE_ENV=production`. The broker is not published to the host, so it is used as `docker compose run --rm api npm run queue:reset` |
 | Testcontainers on Windows and Docker Desktop: slow starts, socket path configuration | 2 | Resolved: `tests/integration/docker-environment.test.js` starts a bare alpine container, so an environment fault is told apart from a code fault at a glance. One broker is started per test file and stopped in `afterAll`; container reuse is not enabled while a single file needs a broker, and is the next step if that changes. CI runs Linux, so a local-only failure is an environment finding |
 | Connecting to a pinned IP while keeping TLS valid | 4 | Resolved: a fresh `undici` Agent per attempt whose `connect.lookup` returns the verified address. The request is still made against the original URL, so SNI and the `Host` header carry the hostname and certificate validation is unaffected. One agent per attempt rather than a pooled one, because a pinned address belongs to a single attempt |
-| Socket.io fan-out across replicas only misbehaves with more than one API instance | 5 | Test with two API containers, not one; a single-instance test passes even when the adapter is misconfigured |
+| Socket.io fan-out across replicas only misbehaves with more than one API instance | 5 | Resolved: the worker's pub/sub message reaches every API instance, so each one emits to its **local** sockets and the adapter is not used for that path — emitting through it would send one copy per replica. An integration test runs a second API instance against the same Redis and asserts a client connected to it receives exactly one copy |
 | Refresh cookie behind the Vite dev server behaves differently than behind nginx | 6 | Dev server proxies `/v1` to the API so the cookie stays same-origin; cookie `Path` and CORS credentials verified in both setups |
 
 ## Phase 0 — Repository skeleton
@@ -100,11 +100,13 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 5 — Dashboard API and realtime
 
-- [ ] Auth routes: register, login, refresh rotation, logout, me
-- [ ] JWT middleware and membership-based authorization
-- [ ] Projects, members, API keys, endpoints (including rotate-secret, enable, disable, test)
-- [ ] Deliveries: keyset list with filters, detail with attempts, replay, bulk replay, stats
-- [ ] Socket.io namespace with handshake auth, project rooms, Redis adapter, per-project throttle, disconnect on access-token expiry
+- [x] Auth routes: register, login, refresh rotation, logout, me
+- [x] JWT middleware and membership-based authorization
+- [x] Projects, members, API keys, endpoints (including rotate-secret, enable, disable, test)
+- [x] Deliveries: keyset list with filters, detail with attempts, replay, bulk replay, stats
+- [x] Socket.io namespace with handshake auth, project rooms, Redis adapter, per-project throttle, disconnect on access-token expiry
+- [x] `RefreshToken` model and its migration — the one entity §11 did not carry, needed to store refresh tokens hashed and revoke them server-side
+- [x] Per-IP rate limit on the auth routes
 
 **Acceptance:** a member of one project cannot read another project's deliveries by id; a replay creates a new delivery with `replayedFromId` set; a connected client receives `delivery.succeeded` for its own project only.
 

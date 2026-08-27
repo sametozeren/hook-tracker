@@ -6,6 +6,7 @@ import { createPublisher } from '../shared/queue/publisher.js';
 import { assertTopology, createTopology } from '../shared/queue/topology.js';
 import { createRedisClient } from '../shared/redis.js';
 import { createApp } from './app.js';
+import { attachRealtime } from './realtime/socket.js';
 
 const logger = createLogger('api');
 
@@ -30,6 +31,8 @@ const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT, env: config.NODE_ENV }, 'api listening');
 });
 
+const realtime = attachRealtime({ server, prisma, redis, config, logger });
+
 let shuttingDown = false;
 
 async function shutdown(signal) {
@@ -47,6 +50,8 @@ async function shutdown(signal) {
   }, config.SHUTDOWN_GRACE_MS);
 
   timer.unref();
+
+  await realtime.close();
 
   await new Promise((resolve) => {
     server.close(resolve);

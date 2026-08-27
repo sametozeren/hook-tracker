@@ -65,6 +65,10 @@ Every response carries `X-Request-Id`. A caller may set the header itself — it
 | POST | `/v1/auth/logout` | revokes the refresh token |
 | GET | `/v1/auth/me` | current user with memberships |
 
+Auth routes are rate limited per IP (20 attempts per minute), separately from the per-key ingestion limit, because the caller of a login attempt has no key yet.
+
+`register` and `login` return `{ user, project?, accessToken }` and set the refresh cookie. `refresh` returns a new `accessToken` and replaces the cookie; the token it was called with is revoked in the same step, so calling it twice with the same cookie is a `401`.
+
 ## Projects & Members
 
 | Method | Path | Purpose |
@@ -109,7 +113,13 @@ Creating or updating a URL runs the SSRF guard synchronously and rejects a block
 | POST | `/v1/projects/:projectId/deliveries/bulk-replay` | replays a filtered set, capped at `BULK_REPLAY_LIMIT` |
 | GET | `/v1/projects/:projectId/stats` | counts by status and a delivery-latency summary for the dashboard header |
 
-Listing uses keyset pagination (`?cursor=&limit=`) rather than `OFFSET`, because the delivery table grows without bound.
+Listing uses keyset pagination (`?cursor=&limit=`) rather than `OFFSET`, because the delivery table grows without bound. A page is `{ deliveries, nextCursor }`, and `nextCursor` is `null` on the last page. The cursor encodes `createdAt` and `id` together: `createdAt` alone is not unique, and a boundary that fell inside a group of same-millisecond rows would repeat or skip them.
+
+`bulk-replay` answers `{ matched, replayed, cappedAt, deliveries }`. `matched` counts the rows the filter selected, `replayed` counts those that were in a state worth replaying, and `cappedAt` reports the limit that was applied — a silent truncation would read as "everything was replayed".
+
+`stats` answers `{ byStatus, total, latency: { attempts, averageMs, slowestMs } }`.
+
+Deleting an endpoint that already has delivery history is refused with `409`; disabling it is the operation that keeps the audit trail intact.
 
 ## Operational
 
