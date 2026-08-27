@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phase 1 complete, acceptance check run and observed. Phase 2 next. Last updated 2026-08-27.
+**Status:** Phase 2 complete, acceptance check run and observed. Phase 3 next. Last updated 2026-08-27.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -24,8 +24,8 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 | Risk | Phase | Handling |
 |---|---|---|
 | Prisma client generation and import paths under ESM need extra configuration | 1 | Resolved: the v7 `prisma-client` generator emits TypeScript into `src/generated/prisma`, which Node 24 runs directly through type stripping, and v7 requires a driver adapter (`@prisma/adapter-pg`). Both are contained in `shared/db.js`, the only module that imports the generated client. A Node older than 24 cannot run the client without `--experimental-strip-types`, which is why `engines` pins 24 |
-| RabbitMQ queue arguments are immutable — a wrong TTL yields `PRECONDITION_FAILED` on restart | 2 | A `queue:reset` dev script that deletes and redeclares; never pointed at a queue holding messages |
-| Testcontainers on Windows and Docker Desktop: slow starts, socket path configuration | 2 | First integration test is a hello-world container to isolate environment problems from code problems; enable container reuse so the suite does not restart brokers per file; remember CI runs Linux, so a local-only failure is an environment finding |
+| RabbitMQ queue arguments are immutable — a wrong TTL yields `PRECONDITION_FAILED` on restart | 2 | Resolved: `npm run queue:reset` inspects every queue first and refuses to delete one that still holds messages unless `--force` is passed; it also refuses to run with `NODE_ENV=production`. The broker is not published to the host, so it is used as `docker compose run --rm api npm run queue:reset` |
+| Testcontainers on Windows and Docker Desktop: slow starts, socket path configuration | 2 | Resolved: `tests/integration/docker-environment.test.js` starts a bare alpine container, so an environment fault is told apart from a code fault at a glance. One broker is started per test file and stopped in `afterAll`; container reuse is not enabled while a single file needs a broker, and is the next step if that changes. CI runs Linux, so a local-only failure is an environment finding |
 | Connecting to a pinned IP while keeping TLS valid | 4 | A custom `undici` Agent whose lookup returns the verified address, with SNI and the `Host` header still carrying the original hostname — otherwise certificate validation fails |
 | Socket.io fan-out across replicas only misbehaves with more than one API instance | 5 | Test with two API containers, not one; a single-instance test passes even when the adapter is misconfigured |
 | Refresh cookie behind the Vite dev server behaves differently than behind nginx | 6 | Dev server proxies `/v1` to the API so the cookie stays same-origin; cookie `Path` and CORS credentials verified in both setups |
@@ -60,11 +60,13 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 2 — Queue layer
 
-- [ ] `backend/src/shared/queue/topology.js` — single declaration of exchanges, queues, TTLs, DLX bindings
-- [ ] `backend/src/shared/queue/connection.js` — connect with retry, channel management, graceful close
-- [ ] `backend/src/shared/queue/publisher.js` — publish to main, retry level and DLQ
-- [ ] `backend/src/shared/retry.js` — schedule, level selection, jitter, failure classification
-- [ ] Integration test: a message published to `retry.1m` reappears on `webhook.delivery` after its TTL
+- [x] `backend/src/shared/queue/topology.js` — single declaration of exchanges, queues, TTLs, DLX bindings
+- [x] `backend/src/shared/queue/connection.js` — connect with retry, channel management, graceful close
+- [x] `backend/src/shared/queue/publisher.js` — publish to main, retry level and DLQ
+- [x] `backend/src/shared/retry.js` — schedule, level selection, jitter, failure classification
+- [x] Integration test: a message published to `retry.1m` reappears on `webhook.delivery` after its TTL
+- [x] `backend/scripts/queue-reset.js` and the `queue:reset` script, from the immutable-arguments risk below
+- [x] `backend/vitest.config.js` — container-sized timeouts for the integration suite
 
 **Acceptance:** topology asserts idempotently on a second startup; the ladder test passes against a real broker in Testcontainers.
 

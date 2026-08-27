@@ -133,7 +133,11 @@ Each retry level needs its own queue because RabbitMQ expires messages only from
 
 **Message body:** `{ deliveryId, attempt }` only. Payload and endpoint secret are read from Postgres by the worker, so the broker never stores secrets, messages stay small, and a manual replay is a plain re-publish.
 
-Topology is declared idempotently at API and worker startup from one `shared/queue/topology.js` definition. Queue arguments are immutable in RabbitMQ: changing a TTL requires a new queue name or a manual delete, so topology changes are treated as migrations.
+Topology is declared idempotently at API and worker startup from one `shared/queue/topology.js` definition. Queue arguments are immutable in RabbitMQ: changing a TTL requires a new queue name or a manual delete, so topology changes are treated as migrations. `npm run queue:reset` performs that delete-and-redeclare in development, and refuses a queue that still holds messages unless it is forced.
+
+**Routing keys.** `webhook.exchange` routes `delivery`, `webhook.retry` routes `retry.<level>` and `throttle.10s`, `webhook.dlx` routes `dlq`. Every object name is built from one namespace — `webhook` in every process — so an integration test can declare the same shape under its own namespace with millisecond TTLs instead of fighting the immutable arguments of the real queues.
+
+**Publishing.** Publishes go through a confirm channel and are awaited, so the API answers `202` only once the broker has taken responsibility for the message. A channel is never created without an `error` listener: amqplib escalates an unhandled channel fault to the connection and closes it, which would turn one missing queue into a dead process.
 
 ## 5. Retry Strategy
 
@@ -155,7 +159,9 @@ After attempt 6 fails, the delivery is routed to `webhook.dlq`, marked `FAILED_P
 * Permanent (no retry, immediate `FAILED_PERMANENTLY`) — `400`, `401`, `403`, `404`, `410`, `422`, and any `3xx`, since redirects are not followed and a redirecting endpoint is a configuration error.
 * When the response carries `Retry-After` and its value exceeds the scheduled delay, the next larger retry level is used instead.
 
-Delays carry ±10% jitter, applied as a per-message `expiration` no greater than the queue TTL, so a recovering downstream host is not hit by a thundering herd.
+Any 4xx not named above is permanent as well: a request the receiver rejected does not become acceptable by being sent again.
+
+Delays carry ±10% jitter, applied as a per-message `expiration` no greater than the queue TTL, so a recovering downstream host is not hit by a thundering herd. The cap makes the jitter one-sided in practice — the expiration can only shorten a delay, so the spread lands in the 10% below each level rather than around it.
 
 `MAX_ATTEMPTS` is not free-form: the ladder has exactly one queue per retry level, so the value must equal `retry levels + 1`. Startup validates this against the schedule and refuses to run on a mismatch. Changing the schedule means changing the queue set, and queue arguments are immutable — see the migration note in §4. Lowering `MAX_ATTEMPTS` to stop earlier is the only change that needs no new queue.
 

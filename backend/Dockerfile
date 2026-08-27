@@ -13,6 +13,7 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json prisma.config.js ./
 COPY prisma ./prisma
+COPY scripts ./scripts
 COPY src ./src
 RUN npx prisma generate && chown -R node:node /app
 USER node
