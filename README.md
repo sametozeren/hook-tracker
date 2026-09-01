@@ -1,4 +1,4 @@
-# hook-tracker
+# HOOK TRACKER
 
 A webhook gateway and retry engine. Your backend hands it one event; it takes
 responsibility for getting that event delivered to every endpoint that wants it —
