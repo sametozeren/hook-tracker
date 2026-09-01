@@ -22,6 +22,16 @@ function deliveryView(delivery) {
   };
 }
 
+function deliveryListView(delivery) {
+  const [lastAttempt] = delivery.attempts;
+
+  return {
+    ...deliveryView(delivery),
+    lastResponseStatus: lastAttempt?.responseStatus ?? null,
+    lastDurationMs: lastAttempt?.durationMs ?? null,
+  };
+}
+
 function attemptView(attempt) {
   return {
     id: attempt.id,
@@ -78,14 +88,21 @@ export function createDeliveryService({ prisma, publisher, config, logger }) {
           ...filterWhere({ projectId, ...rest }),
           ...(cursor ? olderThan(decodeCursor(cursor)) : {}),
         },
-        include: { event: { select: { eventType: true, receivedAt: true } } },
+        include: {
+          event: { select: { eventType: true, receivedAt: true } },
+          attempts: {
+            select: { responseStatus: true, durationMs: true },
+            orderBy: { attemptNumber: 'desc' },
+            take: 1,
+          },
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit + 1,
       });
 
       const { page, nextCursor } = paginate(rows, limit);
 
-      return { deliveries: page.map(deliveryView), nextCursor };
+      return { deliveries: page.map(deliveryListView), nextCursor };
     },
 
     async get({ deliveryId, auth }) {

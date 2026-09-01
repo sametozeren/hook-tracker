@@ -115,6 +115,8 @@ Creating or updating a URL runs the SSRF guard synchronously and rejects a block
 
 Listing uses keyset pagination (`?cursor=&limit=`) rather than `OFFSET`, because the delivery table grows without bound. A page is `{ deliveries, nextCursor }`, and `nextCursor` is `null` on the last page. The cursor encodes `createdAt` and `id` together: `createdAt` alone is not unique, and a boundary that fell inside a group of same-millisecond rows would repeat or skip them.
 
+A list row carries the delivery fields plus `eventType`, `receivedAt`, `lastResponseStatus` and `lastDurationMs` — the `responseStatus` and `durationMs` of the delivery's newest attempt, both `null` when no attempt has been recorded yet, and `lastResponseStatus` `null` when the attempt errored before a response. Those four are list-only: the single-delivery response carries the full `attempts` array instead.
+
 `bulk-replay` answers `{ matched, replayed, cappedAt, deliveries }`. `matched` counts the rows the filter selected, `replayed` counts those that were in a state worth replaying, and `cappedAt` reports the limit that was applied — a silent truncation would read as "everything was replayed".
 
 `stats` answers `{ byStatus, total, latency: { attempts, averageMs, slowestMs } }`.

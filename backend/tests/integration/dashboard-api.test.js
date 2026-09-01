@@ -350,6 +350,25 @@ describe('deliveries', () => {
         }),
       );
     }
+
+    await prisma.deliveryAttempt.createMany({
+      data: [
+        {
+          id: newId('attempt'),
+          deliveryId: deliveries[2].id,
+          attemptNumber: 1,
+          responseStatus: 500,
+          durationMs: 90,
+        },
+        {
+          id: newId('attempt'),
+          deliveryId: deliveries[2].id,
+          attemptNumber: 2,
+          responseStatus: 503,
+          durationMs: 142,
+        },
+      ],
+    });
   });
 
   it('pages with a keyset cursor instead of an offset', async () => {
@@ -393,6 +412,21 @@ describe('deliveries', () => {
     expect(byType.body.deliveries.every((delivery) => delivery.eventType === 'order.paid')).toBe(
       true,
     );
+  });
+
+  it('carries the newest attempt status and duration on every list row', async () => {
+    const response = await call('GET', `/v1/projects/${alice.project.id}/deliveries`, {
+      token: alice.token,
+    });
+
+    const rows = response.body.deliveries;
+    const withAttempts = rows.find((delivery) => delivery.id === deliveries[2].id);
+    const withoutAttempts = rows.find((delivery) => delivery.id === deliveries[0].id);
+
+    expect(withAttempts.lastResponseStatus).toBe(503);
+    expect(withAttempts.lastDurationMs).toBe(142);
+    expect(withoutAttempts.lastResponseStatus).toBeNull();
+    expect(withoutAttempts.lastDurationMs).toBeNull();
   });
 
   it('returns the delivery with its payload and attempt list', async () => {

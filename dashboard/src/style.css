@@ -1,1 +1,188 @@
 @import 'tailwindcss';
+
+/*
+ * Raw tokens live here, not in @theme, so a theme switch is one attribute on
+ * <html> rather than a class swap on every element. @theme inline below binds
+ * the Tailwind colour utilities to these variables by reference, so bg-surface
+ * follows the active theme without a dark: variant on each usage.
+ */
+:root {
+  --ht-page: #f5f7f9;
+  --ht-surface: #ffffff;
+  --ht-sunken: #edf1f4;
+  --ht-rule: #dfe5ea;
+  --ht-rule-soft: #eaeff3;
+
+  --ht-ink: #16202a;
+  --ht-muted: #566573;
+  --ht-faint: #8a99a6;
+
+  --ht-ok: #0f7a5a;
+  --ht-retry: #96600a;
+  --ht-fail: #b3241d;
+  --ht-pending: #2f5bb7;
+  --ht-flight: #0e6e85;
+  --ht-skip: #6c7b89;
+
+  --ht-ok-soft: #e4f3ed;
+  --ht-retry-soft: #f8eedc;
+  --ht-fail-soft: #fbe7e5;
+  --ht-pending-soft: #e7eefb;
+  --ht-flight-soft: #e1f1f5;
+  --ht-skip-soft: #ecf0f3;
+
+  --ht-focus: #1f6588;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ht-page: #0d1216;
+    --ht-surface: #141b21;
+    --ht-sunken: #1a232a;
+    --ht-rule: #253039;
+    --ht-rule-soft: #1e272e;
+
+    --ht-ink: #d8e2e8;
+    --ht-muted: #91a1ad;
+    --ht-faint: #66757f;
+
+    --ht-ok: #3ecf9f;
+    --ht-retry: #e8a33c;
+    --ht-fail: #ff6f60;
+    --ht-pending: #82a5ff;
+    --ht-flight: #4fc3e0;
+    --ht-skip: #7b8993;
+
+    --ht-ok-soft: #122a25;
+    --ht-retry-soft: #2b2317;
+    --ht-fail-soft: #2d1b1a;
+    --ht-pending-soft: #1a2233;
+    --ht-flight-soft: #12262c;
+    --ht-skip-soft: #1b242a;
+
+    --ht-focus: #6fb8dc;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ht-page: #0d1216;
+  --ht-surface: #141b21;
+  --ht-sunken: #1a232a;
+  --ht-rule: #253039;
+  --ht-rule-soft: #1e272e;
+
+  --ht-ink: #d8e2e8;
+  --ht-muted: #91a1ad;
+  --ht-faint: #66757f;
+
+  --ht-ok: #3ecf9f;
+  --ht-retry: #e8a33c;
+  --ht-fail: #ff6f60;
+  --ht-pending: #82a5ff;
+  --ht-flight: #4fc3e0;
+  --ht-skip: #7b8993;
+
+  --ht-ok-soft: #122a25;
+  --ht-retry-soft: #2b2317;
+  --ht-fail-soft: #2d1b1a;
+  --ht-pending-soft: #1a2233;
+  --ht-flight-soft: #12262c;
+  --ht-skip-soft: #1b242a;
+
+  --ht-focus: #6fb8dc;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --color-page: var(--ht-page);
+  --color-surface: var(--ht-surface);
+  --color-sunken: var(--ht-sunken);
+  --color-rule: var(--ht-rule);
+  --color-rule-soft: var(--ht-rule-soft);
+
+  --color-ink: var(--ht-ink);
+  --color-muted: var(--ht-muted);
+  --color-faint: var(--ht-faint);
+
+  --color-ok: var(--ht-ok);
+  --color-retry: var(--ht-retry);
+  --color-fail: var(--ht-fail);
+  --color-pending: var(--ht-pending);
+  --color-flight: var(--ht-flight);
+  --color-skip: var(--ht-skip);
+
+  --color-ok-soft: var(--ht-ok-soft);
+  --color-retry-soft: var(--ht-retry-soft);
+  --color-fail-soft: var(--ht-fail-soft);
+  --color-pending-soft: var(--ht-pending-soft);
+  --color-flight-soft: var(--ht-flight-soft);
+  --color-skip-soft: var(--ht-skip-soft);
+
+  --color-focus: var(--ht-focus);
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--ht-page);
+    color: var(--ht-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ht-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ht-faint);
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@utility pulse-soft {
+  animation: pulse-soft 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

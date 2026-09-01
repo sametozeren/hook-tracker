@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phase 5 complete, acceptance check run and observed. Phase 6 next. Last updated 2026-08-27.
+**Status:** Phase 6 complete, acceptance check run and observed. Phase 7 next. Last updated 2026-09-01.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -112,15 +112,20 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 
 ## Phase 6 — Vue dashboard
 
-- [ ] Shell, router, auth store, API client with refresh handling
-- [ ] Login and register
-- [ ] Deliveries list with filters in the URL, status pills, live updates and the "N new" bar
-- [ ] Delivery detail with attempt timeline, payload viewer, replay and copy-as-cURL
-- [ ] Endpoints: list, create/edit with inline SSRF errors, rotate secret, send test
-- [ ] Events and Settings
-- [ ] Empty, loading and error states from the dashboard spec
+- [x] Shell, router, auth store, API client with refresh handling
+- [x] Login and register
+- [x] Deliveries list with filters in the URL, status pills, live updates and the "N new" bar
+- [x] Delivery detail with attempt timeline, payload viewer, replay and copy-as-cURL
+- [x] Endpoints: list, create/edit with inline SSRF errors, rotate secret, send test
+- [x] Events and Settings
+- [x] Empty, loading and error states from the dashboard spec
 
-**Acceptance:** a fresh clone, seeded, shows deliveries moving through retry to failure live, without a manual refresh.
+**Acceptance:** a fresh clone, seeded, shows deliveries moving through retry to failure live, without a manual refresh. Observed against the compose stack: publishing to `receiver:4000/fail-500` produced rows that reached `RETRYING` and climbed the ladder, `delivery.attempted` arrived over the socket and patched the rows in place, and the seeded history already held `FAILED_PERMANENTLY` rows at 6/6. The full ladder takes about seven hours in real time, so its end-to-end walk into the dead-letter queue is covered by the integration suite, which injects a collapsed schedule.
+
+Two gaps the API leaves open, recorded here rather than in the specs because they are build state, not behaviour:
+
+- `docs/dashboard.md` offers Register only when the instance has no user yet. No route reports whether any user exists, so the dashboard offers it unconditionally and lets `register` fail on a duplicate email. Closing this needs a backend probe.
+- Events has no endpoint of its own. The screen groups the loaded delivery rows by `eventId` and says so on screen, rather than claiming to be a complete event log.
 
 ## Phase 7 — Polish and release
 
