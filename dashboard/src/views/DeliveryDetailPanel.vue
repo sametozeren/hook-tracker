@@ -1,6 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { DETAIL_OVERLAY } from '../components/DetailOverlay.vue';
+import { useSequencedRequest } from '../composables/use-sequenced-request.js';
 import { useDeliveriesStore } from '../stores/deliveries.js';
 import { useEndpointsStore } from '../stores/endpoints.js';
 import { describeApiError } from '../lib/api-error-message.js';
@@ -30,21 +32,36 @@ const OUTCOME_TONE = {
   error: 'border-fail',
 };
 
+const SHELL_CLASS = {
+  overlay: 'min-h-full',
+  column: 'rounded-lg border border-rule lg:sticky lg:top-20',
+};
+
+const HEADER_CLASS = {
+  overlay: 'sticky top-0 z-10 bg-surface',
+  column: '',
+};
+
 const route = useRoute();
 const router = useRouter();
 const deliveries = useDeliveriesStore();
 const endpoints = useEndpointsStore();
 
+const overlayFlag = inject(DETAIL_OVERLAY, null);
+
+const detailRequest = useSequencedRequest();
+
 const delivery = ref(null);
-const loading = ref(false);
-const error = ref(null);
+const loading = detailRequest.loading;
+const error = detailRequest.error;
 const replaying = ref(false);
 const replayError = ref(null);
 const replayed = ref(null);
 const tick = ref(Date.now());
 
-let sequence = 0;
 let countdownTimer = null;
+
+const overlay = computed(() => overlayFlag?.value === true);
 
 const deliveryId = computed(() => route.params.deliveryId);
 
@@ -171,30 +188,18 @@ function formatMs(value) {
   return value === null || value === undefined ? '—' : `${value.toLocaleString('en-US')} ms`;
 }
 
-async function load(id) {
-  const current = ++sequence;
-
-  loading.value = true;
-  error.value = null;
+function load(id) {
   replayed.value = null;
   replayError.value = null;
 
-  try {
-    const body = await deliveries.fetchOne(id);
-
-    if (current === sequence) {
+  return detailRequest.run(() => deliveries.fetchOne(id), {
+    onSuccess(body) {
       delivery.value = body;
-    }
-  } catch (caught) {
-    if (current === sequence) {
-      error.value = caught;
+    },
+    onError() {
       delivery.value = null;
-    }
-  } finally {
-    if (current === sequence) {
-      loading.value = false;
-    }
-  }
+    },
+  });
 }
 
 function close() {
@@ -239,11 +244,14 @@ onBeforeUnmount(() => {
 
 <template>
   <section
-    class="rounded-lg border border-rule bg-surface lg:sticky lg:top-20"
+    class="bg-surface"
+    :class="overlay ? SHELL_CLASS.overlay : SHELL_CLASS.column"
     aria-label="Delivery detail"
-    @keydown.esc="close"
   >
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-rule px-4 py-3">
+    <div
+      class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-rule px-4 py-3"
+      :class="overlay ? HEADER_CLASS.overlay : HEADER_CLASS.column"
+    >
       <span class="font-mono text-xs break-all text-ink">{{ deliveryId }}</span>
       <StatusPill v-if="delivery" :status="delivery.status" size="sm" />
       <span v-if="delivery" class="min-w-0 truncate text-xs text-muted">
@@ -356,10 +364,18 @@ onBeforeUnmount(() => {
                 <span class="text-muted">{{ formatAbsoluteUtc(attempt.startedAt) }}</span>
                 <span class="text-faint">{{ formatMs(attempt.durationMs) }}</span>
               </p>
-              <pre
+              <div
                 v-if="attempt.responseBodySnippet || attempt.errorMessage"
-                class="mt-1 overflow-x-auto rounded-md bg-sunken px-2 py-1.5 font-mono text-[11px] leading-relaxed text-muted"
-              ><code>{{ attempt.responseBodySnippet || attempt.errorMessage }}</code></pre>
+                class="mt-1 flex items-start gap-1.5"
+              >
+                <pre
+                  class="min-w-0 flex-1 overflow-x-auto rounded-md bg-sunken px-2 py-1.5 font-mono text-[11px] leading-relaxed text-muted"
+                ><code>{{ attempt.responseBodySnippet || attempt.errorMessage }}</code></pre>
+                <CopyButton
+                  :text="attempt.responseBodySnippet || attempt.errorMessage"
+                  :title="`Copy what attempt ${attempt.attemptNumber} returned`"
+                />
+              </div>
             </div>
           </li>
         </ol>

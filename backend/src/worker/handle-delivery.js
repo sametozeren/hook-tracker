@@ -7,7 +7,12 @@ import {
   selectRetryLevel,
   shouldRetry,
 } from '../shared/retry.js';
-import { DELIVERY_STATUS, ENDPOINT_STATUS, TERMINAL_STATUSES } from '../shared/delivery-status.js';
+import {
+  DELIVERY_FAILURE_REASON,
+  DELIVERY_STATUS,
+  ENDPOINT_STATUS,
+  TERMINAL_STATUSES,
+} from '../shared/delivery-status.js';
 import { SSRF_ERROR_CODE, resolveSafeTarget } from '../shared/ssrf.js';
 import { deliveryHeaders } from './signing.js';
 
@@ -271,7 +276,7 @@ export function createDeliveryHandler({
         delivery,
         attempt,
         result,
-        reason: FAILURE.PERMANENT,
+        reason: DELIVERY_FAILURE_REASON.PERMANENT,
         completedAt: now(),
       });
 
@@ -327,7 +332,10 @@ export function createDeliveryHandler({
       delivery,
       attempt,
       result,
-      reason: classification === FAILURE.PERMANENT ? 'PERMANENT' : 'EXHAUSTED',
+      reason:
+        classification === FAILURE.PERMANENT
+          ? DELIVERY_FAILURE_REASON.PERMANENT
+          : DELIVERY_FAILURE_REASON.EXHAUSTED,
       completedAt: now(),
     });
 

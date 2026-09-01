@@ -2,6 +2,7 @@
 defineProps({
   size: { type: Number, default: 22 },
   title: { type: String, default: 'hook-tracker' },
+  decorative: { type: Boolean, default: false },
 });
 </script>
 
@@ -11,8 +12,9 @@ defineProps({
     :height="size"
     viewBox="0 0 24 24"
     fill="none"
-    role="img"
-    :aria-label="title"
+    :role="decorative ? undefined : 'img'"
+    :aria-hidden="decorative ? 'true' : undefined"
+    :aria-label="decorative ? undefined : title"
     class="shrink-0"
   >
     <rect

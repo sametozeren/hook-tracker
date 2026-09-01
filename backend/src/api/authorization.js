@@ -1,6 +1,5 @@
 import { ForbiddenError, NotFoundError } from '../shared/errors.js';
-
-export const ROLES = Object.freeze({ OWNER: 'OWNER', MEMBER: 'MEMBER' });
+import { ROLES } from '../shared/roles.js';
 
 export function membershipFor(auth, projectId) {
   return auth.memberships.find((membership) => membership.projectId === projectId);

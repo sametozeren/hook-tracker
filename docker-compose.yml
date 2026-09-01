@@ -104,6 +104,20 @@ services:
       replicas: 1
     restart: unless-stopped
 
+  # Retention and the stuck-delivery sweeper. One instance by intent: both
+  # schedules claim their rows conditionally, so a second replica is safe, but
+  # it would only repeat work the first one already took.
+  jobs:
+    build:
+      context: ./backend
+    command: ['node', 'src/jobs/scheduler.js']
+    env_file:
+      - .env
+    depends_on: *backend-depends-on
+    deploy:
+      replicas: 1
+    restart: unless-stopped
+
   # Demo target for the bundled seed data. No host port: the stack only reaches
   # it over the Docker network, which is also what SSRF_ALLOWLIST_HOSTS permits.
   receiver:

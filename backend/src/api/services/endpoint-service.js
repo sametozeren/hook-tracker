@@ -1,11 +1,11 @@
 import { encryptSecret, generateEndpointSecret } from '../../shared/crypto.js';
 import { ENDPOINT_STATUS } from '../../shared/delivery-status.js';
 import { ConflictError, NotFoundError, UnprocessableError } from '../../shared/errors.js';
+import { previousSecretExpiresAt } from '../../shared/hmac.js';
 import { newId } from '../../shared/ids.js';
+import { ROLES } from '../../shared/roles.js';
 import { resolveSafeTarget } from '../../shared/ssrf.js';
-import { ROLES, assertMembership } from '../authorization.js';
-
-const HOUR_MS = 3_600_000;
+import { assertMembership } from '../authorization.js';
 
 const FOREIGN_KEY_VIOLATION = 'P2003';
 
@@ -118,8 +118,9 @@ export function createEndpointService({
       return {
         ...endpointView(updated),
         secret,
-        previousSecretExpiresAt: new Date(
-          rotatedAt.getTime() + config.SECRET_ROTATION_GRACE_HOURS * HOUR_MS,
+        previousSecretExpiresAt: previousSecretExpiresAt(
+          rotatedAt,
+          config.SECRET_ROTATION_GRACE_HOURS,
         ),
       };
     },

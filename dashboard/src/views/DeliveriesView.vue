@@ -1,22 +1,23 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
-import { FILTER_KEYS, filtersFromQuery, useDeliveriesStore } from '../stores/deliveries.js';
+import { FILTER_KEYS, useDeliveriesStore } from '../stores/deliveries.js';
 import { useEndpointsStore } from '../stores/endpoints.js';
 import { useRealtimeStore } from '../stores/realtime.js';
+import { useQueryFilters } from '../composables/use-query-filters.js';
 import { describeApiError } from '../lib/api-error-message.js';
 import { apiOrigin, buildCurl } from '../lib/curl.js';
-import { statusLabel } from '../components/ui/status.js';
 import { formatAbsoluteUtc } from '../components/ui/time.js';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorState from '../components/ui/ErrorState.vue';
 import SkeletonRows from '../components/ui/SkeletonRows.vue';
 import UiButton from '../components/ui/UiButton.vue';
 import CopyButton from '../components/ui/CopyButton.vue';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
+import BulkReplayControl from '../components/BulkReplayControl.vue';
+import DeliverySummary from '../components/DeliverySummary.vue';
+import DetailOverlay from '../components/DetailOverlay.vue';
 import DeliveryFilters from '../components/DeliveryFilters.vue';
 import DeliveryRow, { DELIVERY_GRID } from '../components/DeliveryRow.vue';
-import SuccessSparkline from '../components/SuccessSparkline.vue';
 
 const TICK_MS = 30 * 1000;
 
@@ -27,24 +28,11 @@ const REALTIME_EVENTS = [
   'delivery.failed',
 ];
 
-const COUNT_ORDER = [
-  { status: 'SUCCEEDED', tone: 'text-ok' },
-  { status: 'RETRYING', tone: 'text-retry' },
-  { status: 'FAILED_PERMANENTLY', tone: 'text-fail' },
-  { status: 'PENDING', tone: 'text-ink' },
-  { status: 'IN_FLIGHT', tone: 'text-ink' },
-  { status: 'SKIPPED', tone: 'text-ink' },
-];
-
 const SKELETON_COLUMNS = ['118px', '20%', '26%', '86px', '62px', '82px', '62px'];
 
 // The API sends no per-row attempt timestamp, so the only time a row carries is
 // the one it was created at. The column is named after the value it holds.
 const HEAD_COLUMNS = ['Status', 'Event', 'Endpoint', 'Attempts', 'Code', 'Duration', 'Created'];
-
-// Mirrors the server's BULK_REPLAY_LIMIT default. The client cannot ask for it,
-// and the operator needs the cap before the run, not only in the result.
-const BULK_REPLAY_CAP = 500;
 
 const route = useRoute();
 const router = useRouter();
@@ -52,22 +40,14 @@ const deliveries = useDeliveriesStore();
 const endpoints = useEndpointsStore();
 const realtime = useRealtimeStore();
 
+const { filters, filterKey, hasFilters, update, clear } = useQueryFilters(FILTER_KEYS);
+
 const now = ref(Date.now());
-const confirmOpen = ref(false);
-const bulkRunning = ref(false);
-const bulkResult = ref(null);
-const bulkError = ref(null);
 
 let unsubscribes = [];
 let ticker = null;
 
 const projectId = computed(() => route.params.projectId);
-
-const filters = computed(() => filtersFromQuery(route.query));
-
-const filterKey = computed(() => FILTER_KEYS.map((key) => filters.value[key] ?? '').join('|'));
-
-const hasFilters = computed(() => Object.keys(filters.value).length > 0);
 
 const detailOpen = computed(() => route.name === 'delivery');
 
@@ -78,26 +58,6 @@ const showSkeleton = computed(() => deliveries.loading && deliveries.items.lengt
 const showEmpty = computed(
   () => !deliveries.loading && !deliveries.error && deliveries.items.length === 0,
 );
-
-const counts = computed(() =>
-  COUNT_ORDER.map((entry) => ({
-    ...entry,
-    label: statusLabel(entry.status),
-    value: deliveries.stats?.byStatus?.[entry.status] ?? 0,
-  })),
-);
-
-const successRate = computed(() => {
-  const stats = deliveries.stats;
-
-  if (!stats || stats.total === 0) {
-    return '—';
-  }
-
-  return `${(((stats.byStatus?.SUCCEEDED ?? 0) / stats.total) * 100).toFixed(1)}%`;
-});
-
-const latency = computed(() => deliveries.stats?.latency ?? null);
 
 const filterSummary = computed(() => {
   const active = filters.value;
@@ -126,37 +86,6 @@ const filterSummary = computed(() => {
   return parts.length > 0 ? parts.join(', ') : 'no filters, so every delivery in this project';
 });
 
-// The list only holds the pages that were loaded, so the exact size of the
-// match set is known only once the cursor is exhausted. Claiming a number
-// before that would be a guess the server would not honour.
-const bulkLabel = computed(() =>
-  deliveries.hasMore ? 'Replay all matching' : `Replay all ${deliveries.items.length}`,
-);
-
-const bulkMessage = computed(() => {
-  const result = bulkResult.value;
-
-  if (!result) {
-    return '';
-  }
-
-  if (result.matched > result.cappedAt) {
-    const left = result.matched - result.cappedAt;
-
-    return `${result.replayed} of ${result.matched} matching deliveries were replayed. Bulk replay is capped at ${result.cappedAt} per run, so ${left} were not replayed. Run it again to take the next batch.`;
-  }
-
-  if (result.replayed < result.matched) {
-    return `${result.replayed} of ${result.matched} matching deliveries were replayed. Deliveries that are still queued or in flight are left alone.`;
-  }
-
-  return `Replayed ${result.replayed} of ${result.matched} matching deliveries.`;
-});
-
-const bulkErrorMessage = computed(() =>
-  bulkError.value ? `Bulk replay failed: ${describeApiError(bulkError.value)}` : '',
-);
-
 const listErrorMessage = computed(() => describeApiError(deliveries.error));
 
 const loadMoreErrorMessage = computed(() => describeApiError(deliveries.loadMoreError));
@@ -176,50 +105,18 @@ function endpointName(endpointId) {
   return endpoints.displayName(endpointId);
 }
 
-function updateFilters(patch) {
-  const query = { ...route.query };
-
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined || value === null || value === '') {
-      delete query[key];
-    } else {
-      query[key] = value;
-    }
-  }
-
-  router.replace({ name: route.name, params: route.params, query });
-}
-
-function clearFilters() {
-  updateFilters(Object.fromEntries(FILTER_KEYS.map((key) => [key, undefined])));
+function closeDetail() {
+  router.push({ name: 'deliveries', params: { projectId: projectId.value }, query: route.query });
 }
 
 function toggleStatus(status) {
-  updateFilters({ status: filters.value.status === status ? undefined : status });
+  update({ status: filters.value.status === status ? undefined : status });
 }
 
 function loadAll() {
-  bulkResult.value = null;
-  bulkError.value = null;
   deliveries.load(projectId.value, filters.value);
   deliveries.loadStats(projectId.value);
   endpoints.load(projectId.value).catch(() => undefined);
-}
-
-async function runBulkReplay() {
-  bulkRunning.value = true;
-  bulkError.value = null;
-
-  try {
-    bulkResult.value = await deliveries.bulkReplay(projectId.value, filters.value);
-    confirmOpen.value = false;
-
-    await deliveries.refresh();
-  } catch (caught) {
-    bulkError.value = caught;
-  } finally {
-    bulkRunning.value = false;
-  }
 }
 
 watch([projectId, filterKey], loadAll, { immediate: true });
@@ -246,80 +143,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-5">
-    <section
-      aria-label="Project delivery summary"
-      class="flex flex-wrap items-start gap-x-7 gap-y-4 rounded-lg bg-sunken px-4 py-3.5"
-    >
-      <div class="min-w-0">
-        <p class="eyebrow">Project totals · all time</p>
-        <div class="mt-2 flex flex-wrap gap-x-6 gap-y-3">
-          <button
-            v-for="count in counts"
-            :key="count.status"
-            type="button"
-            class="flex flex-col gap-px border-b text-left"
-            :class="filters.status === count.status ? 'border-ink' : 'border-transparent'"
-            :aria-pressed="filters.status === count.status"
-            @click="toggleStatus(count.status)"
-          >
-            <span class="tnum font-mono text-lg leading-tight font-medium" :class="count.tone">
-              {{ count.value.toLocaleString('en-US') }}
-            </span>
-            <span class="text-xs text-muted">{{ count.label }}</span>
-          </button>
-        </div>
-        <p class="mt-2 max-w-prose text-xs text-muted">
-          Every delivery this project has ever had, whatever the filters below. Click one to filter
-          the list by that status; the count itself does not change.
-        </p>
-      </div>
-
-      <div class="flex flex-wrap items-start gap-x-6 gap-y-4 md:ml-auto">
-        <div>
-          <p class="eyebrow">Delivered · all time</p>
-          <p class="tnum mt-2 font-mono text-sm font-medium text-ink">{{ successRate }}</p>
-        </div>
-
-        <div>
-          <p class="eyebrow">Success rate · loaded rows</p>
-          <div class="mt-2 flex items-center gap-2.5">
-            <SuccessSparkline
-              :series="deliveries.successRateSeries"
-              :subject="`the ${deliveries.items.length} loaded deliveries`"
-            />
-            <span class="text-xs text-muted">
-              across the {{ deliveries.items.length }} rows loaded here
-            </span>
-          </div>
-        </div>
-
-        <div v-if="latency">
-          <p class="eyebrow">Attempt latency · all time</p>
-          <p class="tnum mt-2 flex flex-wrap gap-x-3.5 font-mono text-xs text-muted">
-            <span>
-              attempts
-              <b class="font-medium text-ink">{{ latency.attempts.toLocaleString('en-US') }}</b>
-            </span>
-            <span>
-              avg
-              <b class="font-medium text-ink">
-                {{ latency.averageMs === null ? '—' : `${Math.round(latency.averageMs)} ms` }}
-              </b>
-            </span>
-            <span>
-              slowest
-              <b class="font-medium text-ink">
-                {{ latency.slowestMs === null ? '—' : `${Math.round(latency.slowestMs)} ms` }}
-              </b>
-            </span>
-          </p>
-        </div>
-      </div>
-
-      <p v-if="deliveries.statsError" class="w-full text-xs text-muted">
-        The project totals could not be loaded. The list below is still current.
-      </p>
-    </section>
+    <DeliverySummary :active-status="filters.status" @toggle-status="toggleStatus" />
 
     <div
       role="status"
@@ -347,53 +171,16 @@ onBeforeUnmount(() => {
       :filters="filters"
       :endpoints="endpoints.items"
       :endpoint-name="endpointName"
-      @change="updateFilters"
-      @clear="clearFilters"
+      @change="update"
+      @clear="clear"
     />
 
-    <div class="flex flex-wrap items-center gap-3">
-      <UiButton
-        :disabled="deliveries.items.length === 0"
-        :loading="bulkRunning"
-        @click="confirmOpen = true"
-      >
-        {{ bulkLabel }}
-      </UiButton>
-
-      <p role="status" :class="bulkMessage ? 'text-sm text-muted' : 'sr-only'">
-        {{ bulkMessage }}
-      </p>
-
-      <p v-if="bulkErrorMessage && !confirmOpen" role="alert" class="text-sm text-fail">
-        {{ bulkErrorMessage }}
-      </p>
-    </div>
-
-    <ConfirmDialog
-      v-if="confirmOpen"
-      eyebrow="Bulk replay"
-      title="Replay every delivery matching this view?"
-      confirm-label="Replay them"
-      variant="primary"
-      size="lg"
-      :pending="bulkRunning"
-      :error="bulkErrorMessage"
-      @close="confirmOpen = false"
-      @confirm="runBulkReplay"
-    >
-      <p class="max-w-prose text-sm text-muted">
-        This replays the deliveries matching {{ filterSummary }}. Each replay creates a new delivery
-        against the same event; the original attempt history is left as it happened.
-      </p>
-      <p class="mt-1 max-w-prose text-sm text-muted">
-        The server replays at most
-        <span class="tnum font-mono text-ink">{{ BULK_REPLAY_CAP }}</span>
-        deliveries per run and reports how many it took. Run it again to take the next batch.
-      </p>
-      <p v-if="deliveries.hasMore" class="mt-1 max-w-prose text-sm text-muted">
-        More rows match than are loaded, so the server decides the final count and reports it back.
-      </p>
-    </ConfirmDialog>
+    <BulkReplayControl
+      :project-id="projectId"
+      :filters="filters"
+      :filter-key="filterKey"
+      :filter-summary="filterSummary"
+    />
 
     <div
       :class="
@@ -419,7 +206,7 @@ onBeforeUnmount(() => {
           :description="`Active: ${filterSummary}.`"
         >
           <template #actions>
-            <UiButton size="sm" @click="clearFilters">Clear filters</UiButton>
+            <UiButton size="sm" @click="clear">Clear filters</UiButton>
           </template>
         </EmptyState>
 
@@ -515,9 +302,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="detailOpen" class="mt-5 min-w-0 lg:mt-0">
+      <DetailOverlay v-if="detailOpen" label="Delivery detail" @close="closeDetail">
         <RouterView />
-      </div>
+      </DetailOverlay>
     </div>
   </div>
 </template>

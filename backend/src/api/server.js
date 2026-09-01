@@ -24,6 +24,7 @@ const app = createApp({
   redis,
   publisher,
   connection: queue.connection,
+  topology,
   config,
   logger,
 });

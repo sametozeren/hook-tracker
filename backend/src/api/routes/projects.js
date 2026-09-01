@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { ROLES, requireProjectRole } from '../authorization.js';
+import { ROLES } from '../../shared/roles.js';
+import { requireProjectRole } from '../authorization.js';
 import { validateBody, validateQuery } from '../middleware/validate.js';
 import {
   apiKeySchema,

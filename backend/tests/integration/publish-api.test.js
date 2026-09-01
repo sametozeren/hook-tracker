@@ -1,13 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/app.js';
 import { generateApiKey } from '../../src/shared/crypto.js';
 import { newId } from '../../src/shared/ids.js';
-import { createPublisher } from '../../src/shared/queue/publisher.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { recordInto } from '../support/consume.js';
 import { createEndpoint, createProject } from '../support/fixtures.js';
 import { waitFor } from '../support/poll.js';
-import { closeClients, openClients, silentLogger, testConfig } from '../support/stack.js';
+import {
+  closeClients,
+  openClients,
+  readJson,
+  silentLogger,
+  startApi,
+  testConfig,
+} from '../support/stack.js';
 
 const RATE_LIMIT = 5;
 const MAX_PAYLOAD_BYTES = 4096;
@@ -37,12 +42,10 @@ async function publish(body, { key = apiKey, headers = {} } = {}) {
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 
-  const text = await response.text();
-
   return {
     status: response.status,
     headers: response.headers,
-    body: text.length > 0 ? JSON.parse(text) : null,
+    body: await readJson(response),
   };
 }
 
@@ -85,25 +88,12 @@ beforeAll(async () => {
     url: 'http://receiver:4000/ok',
   });
 
-  const app = createApp({
-    prisma,
-    redis: clients.redis,
-    publisher: createPublisher({ channel: clients.queue.channel, topology }),
-    connection: clients.queue.connection,
+  ({ server, baseUrl } = await startApi({
+    clients,
+    topology,
+    config: testConfig({ RATE_LIMIT_PUBLISH_PER_MINUTE: RATE_LIMIT, MAX_PAYLOAD_BYTES }),
     logger: silentLogger(),
-    config: testConfig({
-      RATE_LIMIT_PUBLISH_PER_MINUTE: RATE_LIMIT,
-      MAX_PAYLOAD_BYTES,
-    }),
-  });
-
-  server = app.listen(0);
-
-  await new Promise((resolve) => {
-    server.once('listening', resolve);
-  });
-
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  }));
 });
 
 // The limiter counts per API key, so every test gets its own and one test's

@@ -15,6 +15,15 @@ export const WEBHOOK_HEADERS = Object.freeze({
 
 export const WEBHOOK_USER_AGENT = 'HookTracker/1.0';
 
+const HOUR_MS = 3_600_000;
+
+// Architecture §7 states one rotation deadline. The API promises this instant to
+// the integrator and the worker decides against it whether the old signature
+// still travels, so both have to read it from the same place.
+export function previousSecretExpiresAt(secretRotatedAt, graceHours) {
+  return new Date(secretRotatedAt.getTime() + graceHours * HOUR_MS);
+}
+
 function bodyBuffer(rawBody) {
   return Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
 }

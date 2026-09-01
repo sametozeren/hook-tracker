@@ -1,0 +1,61 @@
+name: Feature request
+description: Propose behavior the project does not have yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check `docs/implementation-plan.md` first — the work may already be in a later
+        phase. `docs/architecture.md`, `docs/api.md` and `docs/dashboard.md` describe
+        what the project is meant to do today.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What you are trying to do and where the project stops you. Describe the
+        situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: >
+        What should happen instead. If it changes the HTTP contract, the queue topology,
+        the entity model or the dashboard, say which document would need updating.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Ingestion API
+        - Delivery worker and retry ladder
+        - Maintenance jobs (retention, stuck deliveries)
+        - Dashboard
+        - Data model and migrations
+        - Security
+        - Operations and Docker
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing, and why that is not enough.
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility
+      description: >
+        Would this change an existing response shape, a signature header, a queue
+        argument, or a stored column? Queue arguments are immutable and Prisma has no
+        down-migration, so breaking changes need an expand-and-contract plan.

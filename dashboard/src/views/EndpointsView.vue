@@ -1,31 +1,20 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { RouterLink, useRoute } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { describeApiError } from '../lib/api-error-message.js';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import EndpointRow from '../components/EndpointRow.vue';
+import NoticeBanner from '../components/NoticeBanner.vue';
 import SectionFrame from '../components/SectionFrame.vue';
 import EndpointFormDialog from '../components/EndpointFormDialog.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorState from '../components/ui/ErrorState.vue';
-import IconClose from '../components/ui/IconClose.vue';
 import SecretRevealDialog from '../components/SecretRevealDialog.vue';
 import SkeletonRows from '../components/ui/SkeletonRows.vue';
 import UiButton from '../components/ui/UiButton.vue';
 import { useAuthStore } from '../stores/auth.js';
 import { useEndpointsStore } from '../stores/endpoints.js';
 import { useRealtimeStore } from '../stores/realtime.js';
-
-// Mirrors the worker's ENDPOINT_AUTO_DISABLE_THRESHOLD default. The API returns
-// no disabled-at timestamp and no disable reason, so the failure count is the
-// only evidence the dashboard has for why an endpoint went down — and the server
-// threshold can differ from this one, which is why both readings are hedged.
-const AUTO_DISABLE_THRESHOLD = 20;
-
-const NOTICE_TONES = {
-  ok: { frame: 'border-rule bg-ok-soft', title: 'text-ok' },
-  skip: { frame: 'border-rule bg-skip-soft', title: 'text-skip' },
-  fail: { frame: 'border-rule bg-fail-soft', title: 'text-fail' },
-};
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -54,35 +43,25 @@ const showError = computed(
 
 const showEmpty = computed(() => !endpoints.loading && !endpoints.error && rows.value.length === 0);
 
-const noticeTone = computed(() => NOTICE_TONES[notice.value?.tone] ?? NOTICE_TONES.ok);
+const noticeAction = computed(() => {
+  const endpoint = notice.value?.disable;
 
-const urlPartsById = computed(() =>
-  Object.fromEntries(endpoints.items.map((item) => [item.id, urlParts(item.url)])),
-);
+  if (!endpoint) {
+    return null;
+  }
+
+  return {
+    label: `Disable ${labelFor(endpoint)}`,
+    loading: busyActionFor(endpoint) === 'disable',
+  };
+});
 
 function labelFor(endpoint) {
   return endpoints.displayName(endpoint.id);
 }
 
-function urlParts(rawUrl) {
-  try {
-    const parsed = new URL(rawUrl);
-    const path = parsed.pathname === '/' ? '' : parsed.pathname;
-
-    return { host: parsed.host, path: `${path}${parsed.search}` };
-  } catch {
-    return { host: rawUrl, path: '' };
-  }
-}
-
-function disabledReason(endpoint) {
-  return endpoint.consecutiveFailures >= AUTO_DISABLE_THRESHOLD
-    ? `Its ${endpoint.consecutiveFailures} consecutive failures reach the automatic disable threshold, so it was most likely disabled automatically.`
-    : 'Its failure count is below the automatic disable threshold, so it was most likely disabled by hand.';
-}
-
-function isBusy(endpoint, action) {
-  return busy.value.id === endpoint.id && busy.value.action === action;
+function busyActionFor(endpoint) {
+  return busy.value.id === endpoint.id ? busy.value.action : '';
 }
 
 function errorNotice(caught, title) {
@@ -294,48 +273,12 @@ watch(projectId, () => {
       </template>
     </SectionFrame>
 
-    <div
-      role="status"
-      :class="notice ? ['rounded-md border px-3 py-3', noticeTone.frame] : 'sr-only'"
-    >
-      <div v-if="notice" class="flex items-start gap-3">
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium" :class="noticeTone.title">{{ notice.title }}</p>
-          <p class="mt-1 max-w-prose text-sm break-words text-ink">{{ notice.body }}</p>
-          <p v-if="notice.requestId" class="mt-1 text-xs text-faint">
-            Request id
-            <span class="font-mono break-all text-muted">{{ notice.requestId }}</span>
-          </p>
-
-          <div v-if="notice.link || notice.disable" class="mt-3 flex flex-wrap gap-2">
-            <RouterLink
-              v-if="notice.link"
-              :to="notice.link.to"
-              class="inline-flex h-7 items-center rounded-md border border-rule bg-surface px-2.5 text-xs font-medium text-ink hover:bg-sunken"
-            >
-              {{ notice.link.label }}
-            </RouterLink>
-            <UiButton
-              v-if="notice.disable"
-              size="sm"
-              :loading="isBusy(notice.disable, 'disable')"
-              @click="disableEndpoint(notice.disable)"
-            >
-              Disable {{ labelFor(notice.disable) }}
-            </UiButton>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          class="-mt-1 -mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-faint hover:bg-surface hover:text-ink"
-          aria-label="Dismiss this message"
-          @click="notice = null"
-        >
-          <IconClose class="size-3" />
-        </button>
-      </div>
-    </div>
+    <NoticeBanner
+      :notice="notice"
+      :action="noticeAction"
+      @dismiss="notice = null"
+      @action="disableEndpoint(notice.disable)"
+    />
 
     <div v-if="showSkeleton" class="rounded-lg border border-rule bg-surface px-4 py-4">
       <SkeletonRows :rows="4" :columns="['38%', '14%', '26%', '12%', '10%']" />
@@ -363,133 +306,19 @@ watch(projectId, () => {
     </EmptyState>
 
     <ul v-else class="divide-y divide-rule-soft rounded-lg border border-rule bg-surface">
-      <li
+      <EndpointRow
         v-for="endpoint in rows"
         :key="endpoint.id"
-        class="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:gap-6"
-      >
-        <div class="min-w-0 space-y-2.5">
-          <div class="flex flex-wrap items-center gap-2">
-            <span
-              class="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10.5px] tracking-[0.06em]"
-              :class="
-                endpoint.status === 'ACTIVE' ? 'bg-ok-soft text-ok' : 'bg-skip-soft text-skip'
-              "
-            >
-              <span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-              {{ endpoint.status }}
-            </span>
-            <span v-if="endpoint.description" class="truncate text-sm text-muted">
-              {{ endpoint.description }}
-            </span>
-          </div>
-
-          <p class="truncate font-mono text-sm" :title="endpoint.url">
-            <span class="font-semibold text-ink">{{ urlPartsById[endpoint.id].host }}</span>
-            <span class="text-muted">{{ urlPartsById[endpoint.id].path }}</span>
-          </p>
-
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="eyebrow">Events</span>
-            <span v-if="endpoint.eventTypes.length === 0" class="text-xs text-muted">
-              All event types
-            </span>
-            <template v-else>
-              <span
-                v-for="type in endpoint.eventTypes"
-                :key="type"
-                class="max-w-full truncate rounded-md border border-rule-soft bg-sunken px-1.5 py-0.5 font-mono text-[11px] text-ink"
-              >
-                {{ type }}
-              </span>
-            </template>
-          </div>
-
-          <div
-            v-if="endpoint.status === 'DISABLED'"
-            class="rounded-md border border-rule-soft bg-skip-soft px-3 py-2.5"
-          >
-            <p class="text-sm text-ink">{{ disabledReason(endpoint) }}</p>
-            <p class="mt-1 max-w-prose text-xs text-muted">
-              Nothing is delivered while it is disabled. The API does not record when it was
-              disabled, so this page cannot show a time. Enabling it resumes delivery and resets the
-              consecutive failure count to 0.
-            </p>
-            <div class="mt-2">
-              <UiButton
-                size="sm"
-                :loading="isBusy(endpoint, 'enable')"
-                @click="enableEndpoint(endpoint)"
-              >
-                Enable
-              </UiButton>
-            </div>
-          </div>
-        </div>
-
-        <div class="space-y-3 md:text-right">
-          <div class="flex flex-wrap gap-x-6 gap-y-2 md:justify-end">
-            <div>
-              <p class="eyebrow">Rate limit</p>
-              <p class="tnum font-mono text-sm text-ink">
-                {{ endpoint.rateLimitPerMinute }}
-                <span class="font-sans text-xs text-muted">/ min</span>
-              </p>
-            </div>
-            <div>
-              <p class="eyebrow">Failures in a row</p>
-              <p
-                class="tnum font-mono text-sm"
-                :class="endpoint.consecutiveFailures > 0 ? 'text-fail' : 'text-ink'"
-              >
-                {{ endpoint.consecutiveFailures }}
-              </p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap gap-1.5 md:justify-end">
-            <UiButton size="sm" variant="quiet" @click="openEdit(endpoint)">Edit</UiButton>
-            <UiButton
-              size="sm"
-              variant="quiet"
-              :loading="isBusy(endpoint, 'test')"
-              @click="sendTest(endpoint)"
-            >
-              Send test event
-            </UiButton>
-            <UiButton
-              v-if="isOwner"
-              size="sm"
-              variant="quiet"
-              :loading="isBusy(endpoint, 'rotate')"
-              @click="rotateSecret(endpoint)"
-            >
-              Rotate secret
-            </UiButton>
-            <UiButton
-              v-if="endpoint.status === 'ACTIVE'"
-              size="sm"
-              variant="quiet"
-              :loading="isBusy(endpoint, 'disable')"
-              @click="disableEndpoint(endpoint)"
-            >
-              Disable
-            </UiButton>
-            <UiButton
-              v-else
-              size="sm"
-              variant="quiet"
-              :loading="isBusy(endpoint, 'enable')"
-              @click="enableEndpoint(endpoint)"
-            >
-              Enable
-            </UiButton>
-            <UiButton v-if="isOwner" size="sm" variant="quiet" @click="deleteTarget = endpoint">
-              Delete
-            </UiButton>
-          </div>
-        </div>
-      </li>
+        :endpoint="endpoint"
+        :is-owner="isOwner"
+        :busy-action="busyActionFor(endpoint)"
+        @edit="openEdit(endpoint)"
+        @test="sendTest(endpoint)"
+        @rotate="rotateSecret(endpoint)"
+        @disable="disableEndpoint(endpoint)"
+        @enable="enableEndpoint(endpoint)"
+        @delete="deleteTarget = endpoint"
+      />
     </ul>
 
     <EndpointFormDialog

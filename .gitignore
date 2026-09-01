@@ -21,3 +21,7 @@ Thumbs.db
 !.vscode/extensions.json
 
 backend/src/generated/
+
+# Playwright MCP scratch output: screenshots, page snapshots and console logs
+# from a browser-driven session, written wherever the tool was run.
+.playwright-mcp/

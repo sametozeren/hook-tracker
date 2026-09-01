@@ -129,7 +129,8 @@ Deleting an endpoint that already has delivery history is refused with `409`; di
 |---|---|---|---|
 | GET | `/health` | none | liveness |
 | GET | `/ready` | none | dependency readiness |
-| GET | `/metrics` | none inside the network | Prometheus exposition |
+| GET | `/metrics` | none — rides the published API port; block at the reverse proxy in a deployment | Prometheus exposition |
 | GET | `/docs` | none | Swagger UI over the generated OpenAPI document |
+| GET | `/openapi.json` | none | the document itself |
 
-The OpenAPI document is generated from the same zod schemas the routes validate with, so the spec cannot drift from the implementation.
+The OpenAPI document is generated from the same zod schemas the routes validate with, so the spec cannot drift from the implementation. Response shapes, which no zod schema validates at runtime, are declared next to the request schemas in `src/api/schemas/responses.js` and built from the same shared enums the services write. Swagger UI is served from the installed `swagger-ui-dist` package rather than a CDN, so `/docs` opens on a closed network.

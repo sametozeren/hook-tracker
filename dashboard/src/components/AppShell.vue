@@ -19,9 +19,12 @@ const deliveries = useDeliveriesStore();
 
 const projectMenuOpen = ref(false);
 const userMenuOpen = ref(false);
+const navMenuOpen = ref(false);
 const projectDialogOpen = ref(false);
 const projectMenuRoot = ref(null);
 const userMenuRoot = ref(null);
+const navMenuRoot = ref(null);
+const navMenuButton = ref(null);
 
 const projectId = computed(() => route.params.projectId);
 const project = computed(() => auth.projects.find((item) => item.id === projectId.value) ?? null);
@@ -34,12 +37,15 @@ const navItems = [
   { name: 'settings', label: 'Settings' },
 ];
 
+// Measured at 360px: beside the wordmark, theme button, avatar and disclosure
+// button the bar has room for 'Live' and 'Offline' but not for the two longer
+// labels, so those keep the dot alone below sm rather than overflowing the row.
 const connection = computed(() => {
   const map = {
-    live: { label: 'Live', tone: 'bg-ok' },
-    connecting: { label: 'Connecting', tone: 'bg-retry' },
-    reconnecting: { label: 'Reconnecting', tone: 'bg-retry' },
-    offline: { label: 'Offline', tone: 'bg-fail' },
+    live: { label: 'Live', tone: 'bg-ok', labelFitsNarrow: true },
+    connecting: { label: 'Connecting', tone: 'bg-retry', labelFitsNarrow: false },
+    reconnecting: { label: 'Reconnecting', tone: 'bg-retry', labelFitsNarrow: false },
+    offline: { label: 'Offline', tone: 'bg-fail', labelFitsNarrow: true },
   };
 
   return map[realtime.status] ?? map.offline;
@@ -52,6 +58,18 @@ const themeLabel = computed(() => {
 });
 
 const themeAction = computed(() => `Change theme, currently ${themeMode.value}`);
+
+const accountName = computed(() => auth.user?.name ?? auth.user?.email ?? 'your account');
+
+const accountAction = computed(() => `Account menu for ${accountName.value}`);
+
+const navMenuAction = computed(() =>
+  navMenuOpen.value ? 'Close navigation and project menu' : 'Open navigation and project menu',
+);
+
+const navMenuIcon = computed(() =>
+  navMenuOpen.value ? 'M3.5 3.5l9 9M12.5 3.5l-9 9' : 'M2 4h12M2 8h12M2 12h12',
+);
 
 const initials = computed(() => {
   const name = auth.user?.name ?? auth.user?.email ?? '';
@@ -67,6 +85,28 @@ const initials = computed(() => {
 function closeMenus() {
   projectMenuOpen.value = false;
   userMenuOpen.value = false;
+  navMenuOpen.value = false;
+}
+
+function toggleProjectMenu() {
+  const next = !projectMenuOpen.value;
+
+  closeMenus();
+  projectMenuOpen.value = next;
+}
+
+function toggleUserMenu() {
+  const next = !userMenuOpen.value;
+
+  closeMenus();
+  userMenuOpen.value = next;
+}
+
+function toggleNavMenu() {
+  const next = !navMenuOpen.value;
+
+  closeMenus();
+  navMenuOpen.value = next;
 }
 
 function switchProject(id) {
@@ -95,14 +135,22 @@ function onPointerDown(event) {
   if (userMenuOpen.value && !userMenuRoot.value?.contains(event.target)) {
     userMenuOpen.value = false;
   }
+
+  if (navMenuOpen.value && !navMenuRoot.value?.contains(event.target)) {
+    navMenuOpen.value = false;
+  }
 }
 
 // The menu that holds this trigger unmounts in the same patch that mounts the
 // dialog, so the dialog would capture document.body as the element to restore
-// focus to. Moving focus to the switcher first gives it something that outlives
-// the transition.
+// focus to. Moving focus to a trigger that outlives the transition gives it
+// something to return to: the disclosure button below md, the switcher above.
 function openProjectDialog() {
-  projectMenuRoot.value?.querySelector('button')?.focus();
+  const anchor = navMenuOpen.value
+    ? navMenuButton.value
+    : projectMenuRoot.value?.querySelector('button');
+
+  anchor?.focus();
   closeMenus();
   projectDialogOpen.value = true;
 }
@@ -118,6 +166,8 @@ watch(projectId, () => {
   deliveries.reset();
   closeMenus();
 });
+
+watch(() => route.fullPath, closeMenus);
 
 onMounted(() => {
   realtime.connect();
@@ -138,78 +188,14 @@ onBeforeUnmount(() => {
       <div class="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4 sm:gap-5">
         <RouterLink
           :to="{ name: 'deliveries', params: { projectId } }"
-          class="shrink-0 text-ink"
-          aria-label="hook-tracker, go to deliveries"
+          class="flex shrink-0 items-center gap-2 text-ink"
+          aria-label="HookTracker, go to deliveries"
         >
-          <BrandMark :size="22" />
+          <BrandMark :size="22" decorative />
+          <span class="text-[15px] leading-none font-medium tracking-[-0.015em]">HookTracker</span>
         </RouterLink>
 
-        <div ref="projectMenuRoot" class="relative shrink-0">
-          <button
-            type="button"
-            class="flex items-center gap-2 rounded-lg border border-rule px-2.5 py-1.5 text-sm font-medium hover:border-focus"
-            :aria-expanded="projectMenuOpen"
-            aria-haspopup="menu"
-            @click="projectMenuOpen = !projectMenuOpen"
-          >
-            <span class="max-w-[9rem] truncate sm:max-w-[14rem]">{{
-              project?.name ?? 'Select a project'
-            }}</span>
-            <svg class="size-2.5 text-faint" viewBox="0 0 10 10" aria-hidden="true">
-              <path
-                d="M2 4l3 3 3-3"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-
-          <div
-            v-if="projectMenuOpen"
-            class="absolute left-0 z-40 mt-1 min-w-56 rounded-lg border border-rule bg-surface p-1 shadow-lg"
-            role="menu"
-          >
-            <button
-              v-for="item in auth.projects"
-              :key="item.id"
-              type="button"
-              class="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-sunken"
-              role="menuitem"
-              :aria-current="item.id === projectId ? 'true' : undefined"
-              @click="switchProject(item.id)"
-            >
-              <span class="truncate">{{ item.name }}</span>
-              <span class="font-mono text-[10px] tracking-wider text-faint">{{ item.role }}</span>
-            </button>
-
-            <div class="my-1 border-t border-rule"></div>
-
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-muted hover:bg-sunken hover:text-ink"
-              role="menuitem"
-              @click="openProjectDialog"
-            >
-              <svg class="size-3.5" viewBox="0 0 14 14" aria-hidden="true">
-                <path
-                  d="M7 3v8M3 7h8"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                />
-              </svg>
-              New project
-            </button>
-          </div>
-        </div>
-
-        <nav
-          class="flex min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          aria-label="Primary"
-        >
+        <nav class="hidden min-w-0 gap-0.5 md:flex" aria-label="Primary">
           <RouterLink
             v-for="item in navItems"
             :key="item.name"
@@ -221,18 +207,82 @@ onBeforeUnmount(() => {
           </RouterLink>
         </nav>
 
-        <div class="flex shrink-0 items-center gap-2 sm:gap-3">
+        <div class="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
+          <div ref="projectMenuRoot" class="relative hidden min-w-0 md:block">
+            <button
+              type="button"
+              class="flex items-center gap-2 rounded-lg border border-rule px-2.5 py-1.5 text-sm font-medium hover:border-focus"
+              :aria-expanded="projectMenuOpen"
+              aria-haspopup="menu"
+              @click="toggleProjectMenu"
+            >
+              <span class="max-w-[9rem] truncate lg:max-w-[14rem]">{{
+                project?.name ?? 'Select a project'
+              }}</span>
+              <svg class="size-2.5 shrink-0 text-faint" viewBox="0 0 10 10" aria-hidden="true">
+                <path
+                  d="M2 4l3 3 3-3"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+
+            <div
+              v-if="projectMenuOpen"
+              class="absolute right-0 z-40 mt-1 min-w-56 rounded-lg border border-rule bg-surface p-1 shadow-lg"
+              role="menu"
+            >
+              <button
+                v-for="item in auth.projects"
+                :key="item.id"
+                type="button"
+                class="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-sunken"
+                role="menuitem"
+                :aria-current="item.id === projectId ? 'true' : undefined"
+                @click="switchProject(item.id)"
+              >
+                <span class="truncate">{{ item.name }}</span>
+                <span class="font-mono text-[10px] tracking-wider text-faint">{{ item.role }}</span>
+              </button>
+
+              <div class="my-1 border-t border-rule"></div>
+
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-muted hover:bg-sunken hover:text-ink"
+                role="menuitem"
+                @click="openProjectDialog"
+              >
+                <svg class="size-3.5 shrink-0" viewBox="0 0 14 14" aria-hidden="true">
+                  <path
+                    d="M7 3v8M3 7h8"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                New project
+              </button>
+            </div>
+          </div>
+
           <span
-            class="flex items-center gap-2 text-xs text-muted"
+            class="flex shrink-0 items-center gap-2 text-xs text-muted"
             :title="realtime.lastError || `Realtime socket: ${realtime.status}`"
           >
             <span class="size-2 rounded-full" :class="connection.tone" aria-hidden="true"></span>
-            <span class="max-sm:sr-only">{{ connection.label }}</span>
+            <span :class="{ 'max-sm:sr-only': !connection.labelFitsNarrow }">{{
+              connection.label
+            }}</span>
           </span>
 
           <button
             type="button"
-            class="rounded-md border border-rule px-2 py-1.5 text-xs text-muted hover:border-focus hover:text-ink"
+            class="block shrink-0 rounded-md border border-rule px-2 py-1.5 text-xs text-muted hover:border-focus hover:text-ink"
             :title="themeLabel"
             :aria-label="themeAction"
             @click="cycleThemeMode()"
@@ -248,20 +298,16 @@ onBeforeUnmount(() => {
             </svg>
           </button>
 
-          <div ref="userMenuRoot" class="relative">
+          <div ref="userMenuRoot" class="relative shrink-0">
             <button
               type="button"
-              class="flex items-center gap-2 rounded-md p-1 text-sm text-muted hover:text-ink"
+              class="grid size-9 place-items-center rounded-full border-2 border-rule bg-sunken text-[11px] font-semibold text-ink transition-colors hover:border-focus hover:bg-page focus-visible:border-focus"
               :aria-expanded="userMenuOpen"
               aria-haspopup="menu"
-              @click="userMenuOpen = !userMenuOpen"
+              :aria-label="accountAction"
+              @click="toggleUserMenu"
             >
-              <span
-                class="grid size-7 place-items-center rounded-full border border-rule bg-sunken text-[11px] font-medium"
-                aria-hidden="true"
-                >{{ initials }}</span
-              >
-              <span class="hidden max-w-[10rem] truncate lg:inline">{{ auth.user?.name }}</span>
+              <span aria-hidden="true">{{ initials }}</span>
             </button>
 
             <div
@@ -289,6 +335,82 @@ onBeforeUnmount(() => {
               >
                 Sign out
               </button>
+            </div>
+          </div>
+
+          <div ref="navMenuRoot" class="shrink-0 md:hidden">
+            <button
+              ref="navMenuButton"
+              type="button"
+              class="grid size-9 place-items-center rounded-md border border-rule text-muted hover:border-focus hover:text-ink"
+              :aria-expanded="navMenuOpen"
+              :aria-label="navMenuAction"
+              aria-controls="app-nav-panel"
+              @click="toggleNavMenu"
+            >
+              <svg class="size-4" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  :d="navMenuIcon"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
+
+            <div
+              v-if="navMenuOpen"
+              id="app-nav-panel"
+              class="absolute inset-x-0 top-full z-40 max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-rule bg-surface px-4 py-3 shadow-lg"
+            >
+              <nav class="flex flex-col gap-0.5" aria-label="Primary">
+                <RouterLink
+                  v-for="item in navItems"
+                  :key="item.name"
+                  :to="{ name: item.name, params: { projectId } }"
+                  class="rounded-md px-2.5 py-2 text-sm text-muted hover:bg-sunken hover:text-ink"
+                  active-class="bg-sunken font-medium text-ink"
+                  @click="closeMenus"
+                >
+                  {{ item.label }}
+                </RouterLink>
+              </nav>
+
+              <div class="mt-3 border-t border-rule pt-3">
+                <p class="eyebrow px-2.5">Project</p>
+
+                <div class="mt-1 flex flex-col gap-0.5">
+                  <button
+                    v-for="item in auth.projects"
+                    :key="item.id"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left text-sm hover:bg-sunken"
+                    :aria-current="item.id === projectId ? 'true' : undefined"
+                    @click="switchProject(item.id)"
+                  >
+                    <span class="truncate">{{ item.name }}</span>
+                    <span class="shrink-0 font-mono text-[10px] tracking-wider text-faint">{{
+                      item.role
+                    }}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-muted hover:bg-sunken hover:text-ink"
+                    @click="openProjectDialog"
+                  >
+                    <svg class="size-3.5 shrink-0" viewBox="0 0 14 14" aria-hidden="true">
+                      <path
+                        d="M7 3v8M3 7h8"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                    New project
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

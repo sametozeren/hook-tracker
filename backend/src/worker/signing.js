@@ -1,7 +1,10 @@
 import { decryptSecret } from '../shared/crypto.js';
-import { WEBHOOK_HEADERS, WEBHOOK_USER_AGENT, buildSignatureHeader } from '../shared/hmac.js';
-
-const HOUR_MS = 3_600_000;
+import {
+  WEBHOOK_HEADERS,
+  WEBHOOK_USER_AGENT,
+  buildSignatureHeader,
+  previousSecretExpiresAt,
+} from '../shared/hmac.js';
 
 // During a rotation both signatures travel, so a receiver that still holds the
 // old secret keeps working until the grace window closes.
@@ -12,9 +15,9 @@ export function activeSecrets(endpoint, { graceHours, now }) {
     return secrets;
   }
 
-  const expiresAt = endpoint.secretRotatedAt.getTime() + graceHours * HOUR_MS;
+  const expiresAt = previousSecretExpiresAt(endpoint.secretRotatedAt, graceHours);
 
-  if (now.getTime() < expiresAt) {
+  if (now.getTime() < expiresAt.getTime()) {
     secrets.push(decryptSecret(endpoint.previousSecret));
   }
 

@@ -1,3 +1,5 @@
+import { FAILURE } from './retry.js';
+
 export const DELIVERY_STATUS = Object.freeze({
   PENDING: 'PENDING',
   IN_FLIGHT: 'IN_FLIGHT',
@@ -28,3 +30,8 @@ export const REPLAYABLE_STATUSES = Object.freeze(
 );
 
 export const ENDPOINT_STATUS = Object.freeze({ ACTIVE: 'ACTIVE', DISABLED: 'DISABLED' });
+
+// Architecture §13 fixes the realtime delivery.failed reason vocabulary. It is the
+// classifier's own vocabulary plus the one reason a classification cannot carry:
+// the failure was retryable but the ladder ran out.
+export const DELIVERY_FAILURE_REASON = Object.freeze({ ...FAILURE, EXHAUSTED: 'EXHAUSTED' });

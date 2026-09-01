@@ -38,7 +38,7 @@ A single image is built from `backend/`; the `api`, `worker`, `jobs` and `receiv
 | redis | 6379 | |
 | rabbitmq | 5672 / 15672 | official image, no plugin required |
 
-Node 24 LTS is the pinned runtime, declared identically in `engines`, `.nvmrc` and the Docker base image. Only `dashboard` (8080) and `api` (3000) publish ports to the host; `/metrics` is reachable on the Docker network only and is never exposed publicly.
+Node 24 LTS is the pinned runtime, declared identically in `engines`, `.nvmrc` and the Docker base image. Only `dashboard` (8080) and `api` (3000) publish ports to the host; `/metrics` is mounted on the API listener, so it rides the published `api` port and is reachable from the host, not just the Docker network. A real deployment must block it at the reverse proxy. Its low-cardinality labels (§14) are what keep this non-sensitive.
 
 ### 2.1 Startup Order
 
@@ -311,6 +311,22 @@ hooktracker_endpoints_disabled_total
 ```
 
 Labels are deliberately low-cardinality: no project id, endpoint id or URL appears in a label. Prometheus creates one time series per label combination, so a per-project label turns into unbounded series growth as tenants are added. Per-project figures come from the database through `GET /v1/projects/:projectId/stats`, which is what the dashboard uses.
+
+`/metrics` is served by the API, but deliveries and attempts are produced by the worker, which has no HTTP port and runs at `deploy.replicas`. Nothing is summed across processes: what the worker causes is read back from the source of truth at scrape time.
+
+| Family | Type | Source |
+|---|---|---|
+| `hooktracker_publish_requests_total` | counter | in-process, per API replica; `result` is `accepted`, `rejected` or `error` |
+| `hooktracker_deliveries_total` | gauge | `deliveries` grouped by `status` |
+| `hooktracker_delivery_attempts_total` | counter | `delivery_attempts` grouped by `responseStatus`; `outcome` is `success` or `failure`, `response_class` is `1xx`–`5xx`, `other`, or `none` for an attempt that never got a response |
+| `hooktracker_delivery_duration_seconds` | histogram | `delivery_attempts.durationMs`, one table scan per scrape |
+| `hooktracker_delivery_attempt_number` | histogram | `delivery_attempts.attemptNumber`, bucketed 1..`MAX_ATTEMPTS` |
+| `hooktracker_queue_depth`, `hooktracker_dlq_size` | gauge | `checkQueue` over the queues `shared/queue/topology.js` declares |
+| `hooktracker_endpoints_disabled_total` | gauge | `endpoints` with `status = DISABLED` |
+
+Two consequences are deliberate. `hooktracker_deliveries_total` is a gauge although its name ends in `_total`: the name is fixed above, and a row moving from `PENDING` to `SUCCEEDED` is not a monotonic count. And every database- or broker-backed family is a global snapshot that each API replica reports identically — aggregate those with `max by (...)`, never `sum`; only `hooktracker_publish_requests_total` is per-replica and summed.
+
+A scrape can never take the API down: each source is collected independently, and one that is unreachable is left out of the response rather than rendered as zero, because an absent series and a series that really is zero do not mean the same thing.
 * Structured JSON logs via `pino`, carrying `requestId` on the API and `deliveryId` with `attempt` on the worker. Secrets, API keys and `Authorization` headers are removed through a pino redaction path list rather than ad-hoc string handling.
 * Graceful shutdown on `SIGTERM`: stop consuming, wait for in-flight attempts up to `SHUTDOWN_GRACE_MS`, close the channel, then the connection pool. The surrounding sequence — one shutdown per process, the force-exit timer, the exit code — is `shared/lifecycle.js`, so a new entrypoint gets it by construction rather than by being copied correctly. The worker drains for a share of the grace period and leaves the rest for the closes, so the two cannot race.
 

@@ -1,12 +1,16 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '../lib/api.js';
+import { displayName as endpointDisplayName } from '../lib/endpoint-url.js';
+import { useSequencedRequest } from '../composables/use-sequenced-request.js';
 
 export const useEndpointsStore = defineStore('endpoints', () => {
+  const listRequest = useSequencedRequest();
+
   const items = ref([]);
   const loadedProjectId = ref(null);
-  const loading = ref(false);
-  const error = ref(null);
+  const loading = listRequest.loading;
+  const error = listRequest.error;
 
   const byId = computed(() =>
     Object.fromEntries(items.value.map((endpoint) => [endpoint.id, endpoint])),
@@ -15,17 +19,7 @@ export const useEndpointsStore = defineStore('endpoints', () => {
   function displayName(endpointId) {
     const endpoint = byId.value[endpointId];
 
-    if (!endpoint) {
-      return endpointId;
-    }
-
-    try {
-      const url = new URL(endpoint.url);
-
-      return `${url.host}${url.pathname === '/' ? '' : url.pathname}`;
-    } catch {
-      return endpoint.url;
-    }
+    return endpoint ? endpointDisplayName(endpoint.url) : endpointId;
   }
 
   async function load(projectId, { force = false } = {}) {
@@ -33,23 +27,15 @@ export const useEndpointsStore = defineStore('endpoints', () => {
       return items.value;
     }
 
-    loading.value = true;
-    error.value = null;
+    await listRequest.run(() => api.get(`/projects/${projectId}/endpoints`), {
+      onSuccess(body) {
+        items.value = body.endpoints;
+        loadedProjectId.value = projectId;
+      },
+      rethrow: true,
+    });
 
-    try {
-      const body = await api.get(`/projects/${projectId}/endpoints`);
-
-      items.value = body.endpoints;
-      loadedProjectId.value = projectId;
-
-      return items.value;
-    } catch (caught) {
-      error.value = caught;
-
-      throw caught;
-    } finally {
-      loading.value = false;
-    }
+    return items.value;
   }
 
   function upsert(endpoint) {

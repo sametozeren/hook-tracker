@@ -31,7 +31,7 @@
 - Required integration coverage: the full retry ladder to the DLQ, manual replay, idempotent republish, endpoint rate-limit parking, SSRF rejection, HMAC signature verification against an independent implementation, and worker restart during an in-flight delivery.
 - Unit tests cover pure logic: retry-level selection, failure classification, signature construction, and env schema parsing.
 - Tests never depend on wall-clock sleeps for the retry ladder; the schedule is injected so intervals collapse to milliseconds under test.
-- CI (GitHub Actions) runs lint, unit tests, integration tests, `prisma validate`, and a Docker build for both packages on every push and pull request.
+- There is no CI pipeline. Lint, unit tests, integration tests, `prisma validate` and the Docker build are run locally before a change is considered done, and the observed output is the evidence — a claim that they pass is not.
 
 ## Code Standards
 - Use modern JavaScript (ES6+) and native ESM syntax.

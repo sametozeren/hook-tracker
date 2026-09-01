@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { api } from '../lib/api.js';
+import { useApiAction, useManagedList } from '../composables/use-managed-list.js';
 import { describeApiError } from '../lib/api-error-message.js';
 import ConfirmDialog from './ConfirmDialog.vue';
 import SecretRevealDialog from './SecretRevealDialog.vue';
@@ -34,20 +35,28 @@ const props = defineProps({
   },
 });
 
-const apiKeys = ref([]);
-const loading = ref(false);
-const loadError = ref(null);
+const {
+  rows: apiKeys,
+  loading,
+  loadError,
+  load,
+  target: revokeTarget,
+  ask: askRevoke,
+  cancel: cancelRevoke,
+  pending: revoking,
+  actionError: revokeError,
+  confirm: runRevoke,
+} = useManagedList({
+  projectId: () => props.projectId,
+  resource: 'api-keys',
+  collection: 'apiKeys',
+  errors: REVOKE_ERRORS,
+});
+
+const { pending: creating, error: createError, run: runCreate } = useApiAction(CREATE_ERRORS);
 
 const newKeyName = ref('');
-const creating = ref(false);
-const createError = ref('');
 const revealedKey = ref(null);
-
-const revokeTarget = ref(null);
-const revoking = ref(false);
-const revokeError = ref('');
-
-let sequence = 0;
 
 const columns = computed(() => [
   { key: 'name', label: 'Name', width: 'minmax(0,1.2fr)' },
@@ -59,53 +68,22 @@ const columns = computed(() => [
     : []),
 ]);
 
-async function load() {
-  const current = ++sequence;
-
-  loading.value = true;
-  loadError.value = null;
-
-  try {
-    const body = await api.get(`/projects/${props.projectId}/api-keys`);
-
-    if (current === sequence) {
-      apiKeys.value = body.apiKeys;
-    }
-  } catch (caught) {
-    if (current === sequence) {
-      loadError.value = caught;
-      apiKeys.value = [];
-    }
-  } finally {
-    if (current === sequence) {
-      loading.value = false;
-    }
-  }
-}
-
-async function createKey() {
+function createKey() {
   const name = newKeyName.value.trim();
 
   if (name.length === 0 || name.length > NAME_MAX) {
     createError.value = `A key name is 1 to ${NAME_MAX} characters.`;
 
-    return;
+    return undefined;
   }
 
-  creating.value = true;
-  createError.value = '';
-
-  try {
+  return runCreate(async () => {
     const created = await api.post(`/projects/${props.projectId}/api-keys`, { name });
 
     newKeyName.value = '';
     revealedKey.value = created;
     await load();
-  } catch (caught) {
-    createError.value = describeApiError(caught, CREATE_ERRORS);
-  } finally {
-    creating.value = false;
-  }
+  });
 }
 
 // The plaintext key exists only in this component's state and is dropped the
@@ -114,37 +92,15 @@ function dismissRevealedKey() {
   revealedKey.value = null;
 }
 
-function askRevoke(key) {
-  revokeTarget.value = key;
-  revokeError.value = '';
-}
-
-function cancelRevoke() {
-  revokeTarget.value = null;
-  revokeError.value = '';
-}
-
-async function confirmRevoke() {
-  revoking.value = true;
-  revokeError.value = '';
-
-  try {
+function confirmRevoke() {
+  return runRevoke(async (key) => {
     // This DELETE answers 200 with the revoked key view, unlike the other
     // DELETE routes, so the row is replaced rather than removed.
-    const revoked = await api.delete(
-      `/projects/${props.projectId}/api-keys/${revokeTarget.value.id}`,
-    );
+    const revoked = await api.delete(`/projects/${props.projectId}/api-keys/${key.id}`);
 
-    apiKeys.value = apiKeys.value.map((key) => (key.id === revoked.id ? revoked : key));
-    revokeTarget.value = null;
-  } catch (caught) {
-    revokeError.value = describeApiError(caught, REVOKE_ERRORS);
-  } finally {
-    revoking.value = false;
-  }
+    apiKeys.value = apiKeys.value.map((row) => (row.id === revoked.id ? revoked : row));
+  });
 }
-
-watch(() => props.projectId, load, { immediate: true });
 </script>
 
 <template>

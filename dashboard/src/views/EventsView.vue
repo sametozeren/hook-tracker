@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { filtersFromQuery, useDeliveriesStore } from '../stores/deliveries.js';
+import { RouterLink, useRoute } from 'vue-router';
+import { useDeliveriesStore } from '../stores/deliveries.js';
 import { useEndpointsStore } from '../stores/endpoints.js';
+import { useQueryFilters } from '../composables/use-query-filters.js';
 import { describeApiError } from '../lib/api-error-message.js';
 import { DELIVERY_STATUSES, statusLabel } from '../components/ui/status.js';
 import { fromDateTimeInput, toDateTimeInput } from '../components/ui/time.js';
@@ -16,40 +17,28 @@ import StatusPill from '../components/ui/StatusPill.vue';
 import UiButton from '../components/ui/UiButton.vue';
 
 const EVENT_FILTER_KEYS = ['eventType', 'from', 'to'];
-const IGNORED_FILTER_KEYS = ['status', 'endpointId'];
 const UNDECIDED_STATUSES = new Set(['PENDING', 'IN_FLIGHT']);
 
 const route = useRoute();
-const router = useRouter();
 const deliveries = useDeliveriesStore();
 const endpoints = useEndpointsStore();
 
+// Only the three filters this screen offers are honoured, and anything else is
+// stripped from the URL on arrival. A status or endpoint filter inherited from a
+// Deliveries URL would hide part of an event's fan-out, which is the one thing
+// this screen exists to show.
+const {
+  filters,
+  filterKey,
+  hasFilters,
+  update: writeQuery,
+  clear: clearFilters,
+  dropped: droppedFilters,
+} = useQueryFilters(EVENT_FILTER_KEYS, { dropUnlisted: true });
+
 const draft = ref({ eventType: '', from: '', to: '' });
-const droppedFilters = ref([]);
 
 const projectId = computed(() => route.params.projectId);
-
-// Only the three filters this screen offers are honoured. A status or endpoint
-// filter inherited from a Deliveries URL would hide part of an event's fan-out,
-// which is the one thing this screen exists to show.
-const filters = computed(() => {
-  const fromQuery = filtersFromQuery(route.query);
-  const picked = {};
-
-  for (const key of EVENT_FILTER_KEYS) {
-    if (fromQuery[key]) {
-      picked[key] = fromQuery[key];
-    }
-  }
-
-  return picked;
-});
-
-const hasFilters = computed(() => Object.keys(filters.value).length > 0);
-
-const filterKey = computed(() =>
-  EVENT_FILTER_KEYS.map((key) => filters.value[key] ?? '').join('|'),
-);
 
 const groups = computed(() => {
   const byEvent = new Map();
@@ -84,49 +73,12 @@ function syncDraft() {
   };
 }
 
-function writeQuery(next) {
-  const query = { ...route.query };
-
-  for (const key of IGNORED_FILTER_KEYS) {
-    delete query[key];
-  }
-
-  for (const key of EVENT_FILTER_KEYS) {
-    if (next[key]) {
-      query[key] = next[key];
-    } else {
-      delete query[key];
-    }
-  }
-
-  router.replace({ query });
-}
-
-// This screen and the deliveries screen drive the same store instance, so a
-// filter this screen deliberately does not apply must not survive in the URL:
-// it would render as an active chip on the deliveries screen while paging here
-// used a narrower set.
-function dropIgnoredFilters() {
-  const present = IGNORED_FILTER_KEYS.filter((key) => route.query[key] !== undefined);
-
-  if (present.length === 0) {
-    return;
-  }
-
-  droppedFilters.value = present;
-  writeQuery(filters.value);
-}
-
 function applyFilters() {
   writeQuery({
     eventType: draft.value.eventType.trim(),
     from: fromDateTimeInput(draft.value.from),
     to: fromDateTimeInput(draft.value.to),
   });
-}
-
-function clearFilters() {
-  writeQuery({});
 }
 
 function load() {
@@ -172,7 +124,6 @@ watch([projectId, filterKey], () => {
 });
 
 onMounted(() => {
-  dropIgnoredFilters();
   syncDraft();
   load();
 });

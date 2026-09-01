@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError, UnprocessableError } from '../../shared/errors.js';
 import { newId } from '../../shared/ids.js';
+import { ROLES } from '../../shared/roles.js';
 import { slugify } from './auth-service.js';
 
 function projectView(project) {
@@ -31,10 +32,10 @@ export function createProjectService({ prisma }) {
 
       const [project] = await prisma.$transaction([
         prisma.project.create({ data: { id: projectId, name, slug: slugify(name) } }),
-        prisma.membership.create({ data: { userId, projectId, role: 'OWNER' } }),
+        prisma.membership.create({ data: { userId, projectId, role: ROLES.OWNER } }),
       ]);
 
-      return { ...projectView(project), role: 'OWNER' };
+      return { ...projectView(project), role: ROLES.OWNER };
     },
 
     async rename({ projectId, name }) {
@@ -94,8 +95,10 @@ export function createProjectService({ prisma }) {
         throw new NotFoundError('No such member');
       }
 
-      if (membership.role === 'OWNER') {
-        const owners = await prisma.membership.count({ where: { projectId, role: 'OWNER' } });
+      if (membership.role === ROLES.OWNER) {
+        const owners = await prisma.membership.count({
+          where: { projectId, role: ROLES.OWNER },
+        });
 
         if (owners === 1) {
           throw new ConflictError(

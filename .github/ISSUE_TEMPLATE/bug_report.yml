@@ -1,0 +1,96 @@
+name: Bug report
+description: Something behaves differently than the specs in docs/ say it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a security vulnerability here. See `SECURITY.md` for the private
+        channel.
+
+        Please strip secrets — API keys, `JWT_SECRET`, `SECRET_ENCRYPTION_KEY`, endpoint
+        signing secrets, `Authorization` headers — out of anything you paste.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: process
+    attributes:
+      label: Which process
+      description: Where the wrong behavior appears. Pick more than one if it spans them.
+      multiple: true
+      options:
+        - api
+        - worker
+        - jobs
+        - dashboard
+        - demo-receiver
+        - docker compose / infrastructure
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: request-id
+    attributes:
+      label: X-Request-Id
+      description: >
+        Every API response carries `X-Request-Id`. Paste the one from the failing
+        response — it is what ties your report to a log line. Leave blank if the bug is
+        not an API response.
+      placeholder: 01J8QW...
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Numbered steps. Include the exact request (method, path, body) when it is an API
+        bug, with secrets removed.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: clean-checkout
+    attributes:
+      label: Does it reproduce on a clean checkout?
+      description: >
+        `cp .env.example .env` then `docker compose up -d --build` on a fresh clone, with
+        no local edits. This is the single most useful thing you can tell us.
+      options:
+        - 'Yes — reproduces on a clean checkout with docker compose up'
+        - 'No — only in my modified setup'
+        - 'Not tried yet'
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: >
+        `docker compose logs api worker`, or the output of the process involved. Include
+        the lines around the failure, not just the error. This is rendered as a code
+        block, so no backticks are needed.
+      render: text
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >
+        Commit or tag, host OS, `node --version` and `docker --version` if you run
+        anything outside compose.
+      placeholder: |
+        commit: abc1234
+        os: Ubuntu 24.04
+        node: v24.x
+        docker: 27.x
+    validations:
+      required: true

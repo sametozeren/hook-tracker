@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { hashPassword, sha256Hex, verifyPassword } from '../../shared/crypto.js';
 import { ConflictError, UnauthorizedError } from '../../shared/errors.js';
 import { newId } from '../../shared/ids.js';
+import { ROLES } from '../../shared/roles.js';
 
 const DAY_MS = 86_400_000;
 
@@ -80,7 +81,7 @@ export function createAuthService({ prisma, config, now = () => new Date() }) {
         prisma.project.create({
           data: { id: projectId, name: projectName, slug: slugify(projectName) },
         }),
-        prisma.membership.create({ data: { userId, projectId, role: 'OWNER' } }),
+        prisma.membership.create({ data: { userId, projectId, role: ROLES.OWNER } }),
       ]);
 
       return {

@@ -10,10 +10,13 @@ import { createIdempotency } from './middleware/idempotency.js';
 import { createJwtAuth } from './middleware/jwt-auth.js';
 import { createRateLimiter } from './middleware/rate-limit.js';
 import { requestId } from './middleware/request-id.js';
+import { createPublishCounter, publishRequestMetrics } from './metrics/publish-counter.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createDeliveryRouter } from './routes/deliveries.js';
+import { createDocsRouter } from './routes/docs.js';
 import { createEndpointRouter } from './routes/endpoints.js';
 import { createHealthRouter } from './routes/health.js';
+import { createMetricsRouter } from './routes/metrics.js';
 import { createProjectRouter } from './routes/projects.js';
 import { createPublishRouter } from './routes/publish.js';
 import { createApiKeyService } from './services/api-key-service.js';
@@ -25,12 +28,15 @@ import { createPublishService } from './services/publish-service.js';
 
 const HSTS_MAX_AGE_SECONDS = 15_552_000;
 
+const PUBLISH_PATH = '/v1/publish';
+
 // Stricter than ingestion and counted per IP rather than per key: these routes
 // are where credential stuffing would be attempted, and the attacker has no key.
 const AUTH_ATTEMPTS_PER_MINUTE = 20;
 
-export function createApp({ prisma, redis, publisher, connection, config, logger }) {
+export function createApp({ prisma, redis, publisher, connection, topology, config, logger }) {
   const app = express();
+  const publishCounter = createPublishCounter();
 
   app.disable('x-powered-by');
 
@@ -58,6 +64,8 @@ export function createApp({ prisma, redis, publisher, connection, config, logger
   }
 
   app.use(createHealthRouter({ prisma, redis, connection }));
+  app.use(createDocsRouter());
+  app.use(createMetricsRouter({ prisma, connection, topology, publishCounter, config, logger }));
 
   const publishService = createPublishService({ prisma, publisher, logger });
   const authService = createAuthService({ prisma, config });
@@ -67,6 +75,8 @@ export function createApp({ prisma, redis, publisher, connection, config, logger
   const deliveryService = createDeliveryService({ prisma, publisher, config, logger });
 
   const jwtAuth = createJwtAuth({ prisma, config });
+
+  app.post(PUBLISH_PATH, publishRequestMetrics(publishCounter));
 
   app.use(
     '/v1',

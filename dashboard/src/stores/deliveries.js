@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { api } from '../lib/api.js';
+import { useSequencedRequest } from '../composables/use-sequenced-request.js';
 
 export const DELIVERY_STATUSES = [
   'PENDING',
@@ -15,32 +16,23 @@ const TERMINAL_STATUSES = new Set(['SUCCEEDED', 'FAILED_PERMANENTLY', 'SKIPPED']
 
 export const FILTER_KEYS = ['status', 'endpointId', 'eventType', 'from', 'to'];
 
-export function filtersFromQuery(query) {
-  const filters = {};
-
-  for (const key of FILTER_KEYS) {
-    if (typeof query[key] === 'string' && query[key] !== '') {
-      filters[key] = query[key];
-    }
-  }
-
-  return filters;
-}
-
 export const useDeliveriesStore = defineStore('deliveries', () => {
+  const listRequest = useSequencedRequest();
+  const moreRequest = listRequest.follower();
+  const statsRequest = useSequencedRequest();
+
   const items = ref([]);
   const nextCursor = ref(null);
-  const loading = ref(false);
-  const loadingMore = ref(false);
-  const error = ref(null);
-  const loadMoreError = ref(null);
+  const loading = listRequest.loading;
+  const loadingMore = moreRequest.loading;
+  const error = listRequest.error;
+  const loadMoreError = moreRequest.error;
   const stats = ref(null);
-  const statsError = ref(null);
+  const statsError = statsRequest.error;
   const pendingIds = ref([]);
   const activeFilters = ref({});
 
   let projectId = null;
-  let requestSeq = 0;
 
   const hasMore = computed(() => nextCursor.value !== null);
   const pendingCount = computed(() => pendingIds.value.length);
@@ -79,36 +71,23 @@ export const useDeliveriesStore = defineStore('deliveries', () => {
   }
 
   async function load(id, filters = {}) {
-    const seq = ++requestSeq;
     const counted = new Set(pendingIds.value);
 
     projectId = id;
     activeFilters.value = { ...filters };
-    loading.value = true;
-    error.value = null;
     loadMoreError.value = null;
 
-    try {
-      const body = await api.get(`/projects/${id}/deliveries`, { ...filters, limit: 50 });
-
-      if (seq !== requestSeq) {
-        return;
-      }
-
-      items.value = body.deliveries;
-      nextCursor.value = body.nextCursor;
-      settlePending(counted);
-    } catch (caught) {
-      if (seq === requestSeq) {
-        error.value = caught;
+    await listRequest.run(() => api.get(`/projects/${id}/deliveries`, { ...filters, limit: 50 }), {
+      onSuccess(body) {
+        items.value = body.deliveries;
+        nextCursor.value = body.nextCursor;
+        settlePending(counted);
+      },
+      onError() {
         items.value = [];
         nextCursor.value = null;
-      }
-    } finally {
-      if (seq === requestSeq) {
-        loading.value = false;
-      }
-    }
+      },
+    });
   }
 
   async function loadMore() {
@@ -116,33 +95,26 @@ export const useDeliveriesStore = defineStore('deliveries', () => {
       return;
     }
 
-    loadingMore.value = true;
-    loadMoreError.value = null;
+    const cursor = nextCursor.value;
+    const filters = { ...activeFilters.value };
 
-    try {
-      const body = await api.get(`/projects/${projectId}/deliveries`, {
-        ...activeFilters.value,
-        cursor: nextCursor.value,
-        limit: 50,
-      });
-
-      items.value = [...items.value, ...body.deliveries];
-      nextCursor.value = body.nextCursor;
-    } catch (caught) {
-      loadMoreError.value = caught;
-    } finally {
-      loadingMore.value = false;
-    }
+    await moreRequest.run(
+      () => api.get(`/projects/${projectId}/deliveries`, { ...filters, cursor, limit: 50 }),
+      {
+        onSuccess(body) {
+          items.value = [...items.value, ...body.deliveries];
+          nextCursor.value = body.nextCursor;
+        },
+      },
+    );
   }
 
   async function loadStats(id) {
-    statsError.value = null;
-
-    try {
-      stats.value = await api.get(`/projects/${id}/stats`);
-    } catch (caught) {
-      statsError.value = caught;
-    }
+    await statsRequest.run(() => api.get(`/projects/${id}/stats`), {
+      onSuccess(body) {
+        stats.value = body;
+      },
+    });
   }
 
   function refresh() {

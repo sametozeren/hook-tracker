@@ -1,17 +1,21 @@
 import jwt from 'jsonwebtoken';
 import { io as connectSocket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/api/app.js';
 import { attachRealtime } from '../../src/api/realtime/socket.js';
-import { createPublisher } from '../../src/shared/queue/publisher.js';
+import { REFRESH_COOKIE } from '../../src/api/routes/auth.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { createRealtimePublisher } from '../../src/shared/realtime.js';
 import { newId } from '../../src/shared/ids.js';
 import { createEvent } from '../support/fixtures.js';
 import { wait } from '../support/poll.js';
-import { closeClients, openClients, silentLogger, testConfig } from '../support/stack.js';
-
-const REFRESH_COOKIE = 'ht_refresh';
+import {
+  closeClients,
+  openClients,
+  readJson,
+  silentLogger,
+  startApi,
+  testConfig,
+} from '../support/stack.js';
 
 const topology = createTopology({ namespace: 'itest-dashboard' });
 
@@ -43,13 +47,11 @@ async function call(method, path, { token, body, cookie } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const text = await response.text();
-
   return {
     status: response.status,
     headers: response.headers,
     cookies: response.headers.getSetCookie(),
-    body: text.length > 0 ? JSON.parse(text) : null,
+    body: await readJson(response),
   };
 }
 
@@ -98,22 +100,12 @@ beforeAll(async () => {
 
   await assertTopology(queue.channel, topology);
 
-  const app = createApp({
-    prisma,
-    redis: clients.redis,
-    publisher: createPublisher({ channel: queue.channel, topology }),
-    connection: queue.connection,
+  ({ server, baseUrl } = await startApi({
+    clients,
+    topology,
     config: appConfig,
     logger,
-  });
-
-  server = app.listen(0);
-
-  await new Promise((resolve) => {
-    server.once('listening', resolve);
-  });
-
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  }));
 
   realtime = attachRealtime({ server, prisma, redis: clients.redis, config: appConfig, logger });
 
@@ -224,6 +216,36 @@ describe('endpoints', () => {
 
     expect(list.body.endpoints[0].id).toBe(endpoint.id);
     expect(list.body.endpoints[0].secret).toBeUndefined();
+  });
+
+  // An empty eventTypes list subscribes to every event, so this endpoint is
+  // removed again: left behind, it would join the fan-out of every later test.
+  it('leaves eventTypes alone when an update does not mention it', async () => {
+    const created = await call('POST', `/v1/projects/${alice.project.id}/endpoints`, {
+      token: alice.token,
+      body: { url: 'http://localhost:4000/ok', eventTypes: ['refactor.probe'] },
+    });
+
+    const updated = await call('PATCH', `/v1/endpoints/${created.body.id}`, {
+      token: alice.token,
+      body: { description: 'renamed, subscriptions untouched' },
+    });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.eventTypes).toEqual(['refactor.probe']);
+
+    const cleared = await call('PATCH', `/v1/endpoints/${created.body.id}`, {
+      token: alice.token,
+      body: { eventTypes: [] },
+    });
+
+    expect(cleared.body.eventTypes).toEqual([]);
+
+    const removed = await call('DELETE', `/v1/endpoints/${created.body.id}`, {
+      token: alice.token,
+    });
+
+    expect(removed.status).toBe(204);
   });
 
   it('refuses a URL the SSRF guard would block, at configuration time', async () => {
@@ -516,19 +538,11 @@ describe('realtime', () => {
   // every instance receives the worker's pub/sub message, so an emit through the
   // adapter would send one copy per instance.
   it('delivers exactly one copy while a second API instance is running', async () => {
-    const secondApp = createApp({
-      prisma,
-      redis: clients.redis,
-      publisher: createPublisher({ channel: queue.channel, topology }),
-      connection: queue.connection,
+    const { server: secondServer, baseUrl: secondUrl } = await startApi({
+      clients,
+      topology,
       config: appConfig,
       logger,
-    });
-
-    const secondServer = secondApp.listen(0);
-
-    await new Promise((resolve) => {
-      secondServer.once('listening', resolve);
     });
 
     const secondRealtime = attachRealtime({
@@ -539,7 +553,6 @@ describe('realtime', () => {
       logger,
     });
 
-    const secondUrl = `http://127.0.0.1:${secondServer.address().port}`;
     const socket = connectSocket(`${secondUrl}/realtime`, {
       auth: { token: alice.token },
       transports: ['websocket'],

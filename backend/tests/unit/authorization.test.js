@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ROLES, assertMembership, membershipFor } from '../../src/api/authorization.js';
+import { assertMembership, membershipFor } from '../../src/api/authorization.js';
+import { ROLES } from '../../src/shared/roles.js';
 import { slugify } from '../../src/api/services/auth-service.js';
 
 const auth = {

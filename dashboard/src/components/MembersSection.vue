@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../lib/api.js';
+import { useApiAction, useManagedList } from '../composables/use-managed-list.js';
 import { useAuthStore } from '../stores/auth.js';
 import { describeApiError } from '../lib/api-error-message.js';
 import ConfirmDialog from './ConfirmDialog.vue';
@@ -39,20 +40,28 @@ const props = defineProps({
 const auth = useAuthStore();
 const router = useRouter();
 
-const members = ref([]);
-const loading = ref(false);
-const loadError = ref(null);
+const {
+  rows: members,
+  loading,
+  loadError,
+  load,
+  target: removeTarget,
+  ask: askRemove,
+  cancel: cancelRemove,
+  pending: removing,
+  actionError: removeError,
+  confirm: runRemove,
+} = useManagedList({
+  projectId: () => props.projectId,
+  resource: 'members',
+  collection: 'members',
+  errors: REMOVE_ERRORS,
+});
+
+const { pending: adding, error: addError, run: runAdd } = useApiAction(ADD_ERRORS);
 
 const invite = ref({ email: '', role: 'MEMBER' });
-const adding = ref(false);
-const addError = ref('');
 const addNotice = ref('');
-
-const removeTarget = ref(null);
-const removing = ref(false);
-const removeError = ref('');
-
-let sequence = 0;
 
 const columns = computed(() => [
   { key: 'name', label: 'Name', width: 'minmax(0,1.1fr)' },
@@ -66,44 +75,18 @@ const columns = computed(() => [
 
 const removingSelf = computed(() => removeTarget.value?.userId === auth.user?.id);
 
-async function load() {
-  const current = ++sequence;
-
-  loading.value = true;
-  loadError.value = null;
-
-  try {
-    const body = await api.get(`/projects/${props.projectId}/members`);
-
-    if (current === sequence) {
-      members.value = body.members;
-    }
-  } catch (caught) {
-    if (current === sequence) {
-      loadError.value = caught;
-      members.value = [];
-    }
-  } finally {
-    if (current === sequence) {
-      loading.value = false;
-    }
-  }
-}
-
-async function addMember() {
+function addMember() {
   const email = invite.value.email.trim();
 
   if (email.length === 0) {
     addError.value = 'Enter the email address of a registered account.';
 
-    return;
+    return undefined;
   }
 
-  adding.value = true;
-  addError.value = '';
   addNotice.value = '';
 
-  try {
+  return runAdd(async () => {
     const added = await api.post(`/projects/${props.projectId}/members`, {
       email,
       role: invite.value.role,
@@ -112,50 +95,28 @@ async function addMember() {
     invite.value = { email: '', role: 'MEMBER' };
     addNotice.value = `${added.email} was added as ${added.role.toLowerCase()}.`;
     await load();
-  } catch (caught) {
-    addError.value = describeApiError(caught, ADD_ERRORS);
-  } finally {
-    adding.value = false;
-  }
-}
-
-function askRemove(member) {
-  removeTarget.value = member;
-  removeError.value = '';
-}
-
-function cancelRemove() {
-  removeTarget.value = null;
-  removeError.value = '';
+  });
 }
 
 async function confirmRemove() {
-  const member = removeTarget.value;
+  const wasSelf = removingSelf.value;
+  const removed = await runRemove((member) =>
+    api.delete(`/projects/${props.projectId}/members/${member.userId}`),
+  );
 
-  removing.value = true;
-  removeError.value = '';
-
-  try {
-    await api.delete(`/projects/${props.projectId}/members/${member.userId}`);
-
-    if (member.userId === auth.user?.id) {
-      await auth.loadMe();
-      removeTarget.value = null;
-      router.push({ name: 'home' });
-
-      return;
-    }
-
-    removeTarget.value = null;
-    await load();
-  } catch (caught) {
-    removeError.value = describeApiError(caught, REMOVE_ERRORS);
-  } finally {
-    removing.value = false;
+  if (!removed) {
+    return;
   }
-}
 
-watch(() => props.projectId, load, { immediate: true });
+  if (wasSelf) {
+    await auth.loadMe();
+    router.push({ name: 'home' });
+
+    return;
+  }
+
+  await load();
+}
 </script>
 
 <template>

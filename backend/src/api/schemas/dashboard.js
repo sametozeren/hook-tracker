@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DELIVERY_STATUS_VALUES } from '../../shared/delivery-status.js';
 import { EVENT_TYPE_PATTERN, MAX_EVENT_TYPE_LENGTH } from '../../shared/event-types.js';
+import { ROLES, ROLE_VALUES } from '../../shared/roles.js';
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -31,21 +32,30 @@ export const loginSchema = z.object({ email, password: z.string().min(1).max(200
 export const projectSchema = z.object({ name }).strict();
 
 export const memberSchema = z
-  .object({ email, role: z.enum(['OWNER', 'MEMBER']).default('MEMBER') })
+  .object({ email, role: z.enum(ROLE_VALUES).default(ROLES.MEMBER) })
   .strict();
 
 export const apiKeySchema = z.object({ name }).strict();
+
+const eventTypes = z.array(eventTypePattern).max(50);
 
 export const endpointCreateSchema = z
   .object({
     url: z.url().max(2048),
     description: z.string().max(500).optional(),
-    eventTypes: z.array(eventTypePattern).max(50).default([]),
+    eventTypes: eventTypes.default([]),
     rateLimitPerMinute: z.coerce.number().int().min(1).max(60_000).optional(),
   })
   .strict();
 
-export const endpointUpdateSchema = endpointCreateSchema.partial().strict();
+// `.partial()` makes a key optional but keeps its default, so an update that
+// omitted eventTypes used to parse as an explicit empty list and silently clear
+// the endpoint's subscriptions. The key is redeclared here without one, so an
+// absent eventTypes stays absent and only an explicit [] clears the list.
+export const endpointUpdateSchema = endpointCreateSchema
+  .partial()
+  .extend({ eventTypes: eventTypes.optional() })
+  .strict();
 
 export const deliveryFilterSchema = z
   .object({
