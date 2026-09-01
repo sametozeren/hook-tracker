@@ -15,6 +15,11 @@ const routes = [
     meta: { guest: true },
   },
   {
+    path: '/projects/new',
+    name: 'new-project',
+    component: () => import('../views/NewProjectView.vue'),
+  },
+  {
     path: '/projects/:projectId',
     component: () => import('../components/AppShell.vue'),
     children: [
@@ -63,11 +68,13 @@ router.beforeEach(async (to) => {
 
   await auth.bootstrap();
 
-  // A signed-in session with no membership has nowhere to be sent, so it stays
-  // on the login screen, which states that and offers a way forward. Sending it
-  // to a project route would redirect straight back here.
+  // A signed-in session with no membership is sent to project creation rather
+  // than to a project route, which would redirect straight back here. Removing
+  // someone from their only project leaves them in exactly this state.
+  const landing = () => firstProjectRoute(auth) ?? { name: 'new-project' };
+
   if (to.meta.guest) {
-    return (auth.isAuthenticated && firstProjectRoute(auth)) || true;
+    return auth.isAuthenticated ? landing() : true;
   }
 
   if (!auth.isAuthenticated) {
@@ -75,14 +82,14 @@ router.beforeEach(async (to) => {
   }
 
   if (to.name === 'home') {
-    return firstProjectRoute(auth) ?? { name: 'login' };
+    return landing();
   }
 
   // A project id in the URL that the session has no membership for is answered
   // the way the API answers it: nothing is disclosed, the user goes to a
   // project that is theirs.
   if (to.params.projectId && !auth.roleIn(to.params.projectId)) {
-    return firstProjectRoute(auth) ?? { name: 'login' };
+    return landing();
   }
 
   return true;

@@ -7,6 +7,8 @@ import { useEndpointsStore } from '../stores/endpoints.js';
 import { useDeliveriesStore } from '../stores/deliveries.js';
 import { cycleThemeMode, themeMode } from '../lib/theme.js';
 import BrandMark from './ui/BrandMark.vue';
+import ModalShell from './ModalShell.vue';
+import ProjectCreateForm from './ProjectCreateForm.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -17,6 +19,7 @@ const deliveries = useDeliveriesStore();
 
 const projectMenuOpen = ref(false);
 const userMenuOpen = ref(false);
+const projectDialogOpen = ref(false);
 const projectMenuRoot = ref(null);
 const userMenuRoot = ref(null);
 
@@ -94,6 +97,22 @@ function onPointerDown(event) {
   }
 }
 
+// The menu that holds this trigger unmounts in the same patch that mounts the
+// dialog, so the dialog would capture document.body as the element to restore
+// focus to. Moving focus to the switcher first gives it something that outlives
+// the transition.
+function openProjectDialog() {
+  projectMenuRoot.value?.querySelector('button')?.focus();
+  closeMenus();
+  projectDialogOpen.value = true;
+}
+
+async function onProjectCreated(project) {
+  projectDialogOpen.value = false;
+  await auth.loadMe();
+  router.push({ name: 'deliveries', params: { projectId: project.id } });
+}
+
 watch(projectId, () => {
   endpoints.reset();
   deliveries.reset();
@@ -164,6 +183,25 @@ onBeforeUnmount(() => {
             >
               <span class="truncate">{{ item.name }}</span>
               <span class="font-mono text-[10px] tracking-wider text-faint">{{ item.role }}</span>
+            </button>
+
+            <div class="my-1 border-t border-rule"></div>
+
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-muted hover:bg-sunken hover:text-ink"
+              role="menuitem"
+              @click="openProjectDialog"
+            >
+              <svg class="size-3.5" viewBox="0 0 14 14" aria-hidden="true">
+                <path
+                  d="M7 3v8M3 7h8"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+              </svg>
+              New project
             </button>
           </div>
         </div>
@@ -260,5 +298,19 @@ onBeforeUnmount(() => {
     <main class="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6">
       <RouterView />
     </main>
+
+    <ModalShell
+      v-if="projectDialogOpen"
+      eyebrow="Projects"
+      title="New project"
+      description="Endpoints, API keys and deliveries belong to one project. This one starts empty, and you become its owner."
+      @close="projectDialogOpen = false"
+    >
+      <ProjectCreateForm
+        :autofocus="false"
+        @created="onProjectCreated"
+        @cancel="projectDialogOpen = false"
+      />
+    </ModalShell>
   </div>
 </template>

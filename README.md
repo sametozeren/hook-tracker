@@ -5,7 +5,9 @@ responsibility for getting them delivered to third-party endpoints — retrying 
 TTL/DLX ladder when the receiver is down, signing every request, and keeping a full
 audit trail of each attempt.
 
-> **Status: under construction.** Phase 0 (repository skeleton) is complete. See
+> **Status: under construction.** Phases 0–6 are complete: the stack runs, events are
+> ingested, delivered and retried, and the dashboard is usable. Phase 7 (release polish:
+> OpenAPI, metrics, CI, and this README) is next. See
 > [`docs/implementation-plan.md`](docs/implementation-plan.md) for what lands when.
 
 ## Quickstart

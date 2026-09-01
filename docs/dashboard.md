@@ -17,6 +17,8 @@ Email and password. Register is only offered when the instance has no user yet �
 ### Shell
 Persistent project switcher, primary navigation (Deliveries, Endpoints, Events, Settings), a connection indicator for the realtime socket, and the signed-in user menu. A dropped socket shows a reconnecting state instead of silently going stale.
 
+The switcher also creates projects, since a user may own more than one and the API places no limit on that. A signed-in account with no membership — the state left behind when someone is removed from their only project — lands on the same creation screen rather than on a project route that would redirect it straight back to login.
+
 ### Deliveries — the default screen
 Cursor-paginated table: status pill, event type, endpoint, attempt count, last response code, duration, relative time. Filters for status, endpoint, event type and a date range, all reflected in the URL so a filtered view can be shared or bookmarked.
 
