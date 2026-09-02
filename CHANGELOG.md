@@ -11,6 +11,73 @@ change is listed here with the steps an existing deployment has to take.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-03
+
+An audit of the whole repository — the API surface, the operational topology, the dashboard, the
+specifications, the test suite, and then a separate pass reading the code for security and
+correctness. What it found that was a defect is fixed here. What it found that was missing is
+written down in [`docs/roadmap.md`](docs/roadmap.md) rather than left to be discovered.
+
+### Security
+
+- **An endpoint's URL could be changed by any project member.** `update`, `enable` and `disable`
+  answered to `MEMBER`, while `docs/architecture.md` grants a member read access plus replay. A
+  member could point an endpoint at a server they controlled and receive every payload the project
+  published to it. The service now requires `OWNER` by default, and only the operations that are
+  genuinely a member's — sending a test event — opt out of it.
+- **The SSRF guard could be bypassed with an IPv6 literal.** `classifyIpv6` matched IPv4-mapped
+  addresses only in dotted form, and `URL` normalises them to hex, so `http://[::ffff:127.0.0.1]/`
+  and `http://[::ffff:a9fe:a9fe]/` — the cloud metadata address — were classified as public and
+  delivered to, with the response body readable through the delivery detail. Classification now
+  works on the 16 bytes of the address and covers IPv4-mapped, IPv4-compatible and NAT64 forms, and
+  the IPv4 table gained the special-use blocks it was missing.
+- **One account's failed logins locked out everyone else.** The auth limit was counted per address,
+  and behind the dashboard's nginx every login arrives from the proxy. It is now counted per address
+  and account together. `TRUST_PROXY` (default 0) says how many proxies sit in front of the API.
+- **Refresh rotation was not atomic and reuse was not detected.** Two concurrent refreshes with one
+  stolen cookie could both succeed. Rotation is now a conditional update, and a token that comes
+  back after it was rotated revokes the whole family and is logged.
+- **`GET /ready` returned the client library's error text**, which carries internal hosts and ports,
+  to an unauthenticated caller. The body now names the dependency and whether it is up; the reason
+  goes to the log.
+
+### Fixed
+
+- **A resolver outage failed deliveries permanently.** Every failure from the SSRF guard was treated
+  as permanent, so a name that did not resolve skipped the retry ladder, landed in the dead-letter
+  queue and counted against the endpoint's health. `dns_failure` is retryable now, as
+  `docs/architecture.md` §5 always said it was; a blocked scheme, port, URL or private address stays
+  permanent.
+- **The consecutive-failure counter lost increments under load.** It was written from the value read
+  at the start of the attempt, so concurrent failures overwrote each other and
+  `ENDPOINT_AUTO_DISABLE_THRESHOLD` was effectively unreachable while a worker was busy. The
+  increment happens in the database now, and crossing the threshold is a separate conditional update
+  so the disable, its event and its alert happen exactly once.
+- **The default idempotency key ignored `endpointIds`.** The same body aimed at a second endpoint
+  replayed the first response and produced no deliveries at all. The key now covers the target set,
+  order-insensitively; a publish that names no endpoints hashes exactly as before, so keys already
+  issued stay valid.
+- **Replaying a delivery that had not finished queued a duplicate.** Single replay now refuses
+  `PENDING` and `IN_FLIGHT` with `409`, matching what bulk replay already skipped.
+- **A long `JWT_ACCESS_TTL` killed the realtime socket.** Anything past about 24.8 days overflowed
+  the expiry timer and fired it immediately, so every socket disconnected as soon as it connected.
+- **Signing in with no project left the user on a dead end.** The login form now lands on project
+  creation, which is where the router guard already sent anyone who reloaded the page.
+
+### Added
+
+- [`docs/roadmap.md`](docs/roadmap.md) — 38 items that are not built, each with why it matters and
+  how big it is, and a list of what is deliberately out of scope. The README links to it.
+- `TRUST_PROXY`, documented with the reason it is off by default.
+
+### Changed
+
+- Editing, enabling and disabling an endpoint are owner-only, in the API and in the dashboard.
+  Sending a test event stays open to a member.
+- The specifications were corrected where they had drifted from the code: the registration model on
+  the login screen, the `delivery.failed` reason vocabulary, the level the HMAC test actually runs
+  at, and the implementation plan's status line.
+
 ## [0.2.0] - 2026-09-02
 
 Visibility and alerting: the dead-letter queue stops growing, a project can be told when something
@@ -132,6 +199,7 @@ delivery workers, the maintenance jobs, the dashboard, and a demo receiver.
 - There is no CI pipeline. Lint, both test suites, `prisma validate` and the Docker
   build are run locally and their output observed, as `docs/guidelines.md` requires.
 
-[Unreleased]: https://github.com/sametozeren/hook-tracker/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sametozeren/hook-tracker/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sametozeren/hook-tracker/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sametozeren/hook-tracker/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sametozeren/hook-tracker/releases/tag/v0.1.0

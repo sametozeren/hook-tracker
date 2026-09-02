@@ -47,7 +47,7 @@ export function createEndpointService({
     }
   }
 
-  async function load({ endpointId, auth, role = ROLES.MEMBER }) {
+  async function load({ endpointId, auth, role = ROLES.OWNER }) {
     const endpoint = await prisma.endpoint.findUnique({ where: { id: endpointId } });
 
     if (!endpoint) {
@@ -102,7 +102,7 @@ export function createEndpointService({
     },
 
     async rotateSecret({ endpointId, auth }) {
-      const endpoint = await load({ endpointId, auth, role: ROLES.OWNER });
+      const endpoint = await load({ endpointId, auth });
       const secret = generateEndpointSecret();
       const rotatedAt = now();
 
@@ -150,7 +150,7 @@ export function createEndpointService({
     // Delivery.endpointId is onDelete: Restrict, so an endpoint with history
     // cannot be deleted. The audit trail outlives the configuration.
     async remove({ endpointId, auth }) {
-      const endpoint = await load({ endpointId, auth, role: ROLES.OWNER });
+      const endpoint = await load({ endpointId, auth });
 
       try {
         await prisma.endpoint.delete({ where: { id: endpoint.id } });
@@ -165,8 +165,10 @@ export function createEndpointService({
       }
     },
 
+    // Sending a test event changes no configuration; it is the same class of
+    // operational action as replay, which the authorization model grants MEMBER.
     async sendTest({ endpointId, auth }) {
-      const endpoint = await load({ endpointId, auth });
+      const endpoint = await load({ endpointId, auth, role: ROLES.MEMBER });
 
       return publishService.publishEvent({
         projectId: endpoint.projectId,

@@ -4,8 +4,14 @@ import { canonicalJson } from '../../shared/json.js';
 
 const RESERVED = 'reserved';
 
-export function defaultIdempotencyKey({ eventType, payload }) {
-  return sha256Hex(`${eventType}${canonicalJson(payload)}`);
+// The target set belongs in the key: the same body aimed at two different
+// endpoint lists is two different publishes. A body without endpointIds hashes
+// to exactly what it hashed before the targets were folded in, so keys already
+// issued against a live window keep replaying instead of silently expiring.
+export function defaultIdempotencyKey({ eventType, payload, endpointIds }) {
+  const targets = endpointIds?.length ? canonicalJson([...new Set(endpointIds)].sort()) : '';
+
+  return sha256Hex(`${eventType}${canonicalJson(payload)}${targets}`);
 }
 
 export function createIdempotency({ redis, ttlSeconds }) {

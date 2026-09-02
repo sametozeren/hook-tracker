@@ -1,3 +1,4 @@
+import { authRateLimitKey } from './auth-rate-limit.js';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
@@ -42,6 +43,13 @@ export function createApp({ prisma, redis, publisher, connection, topology, conf
 
   app.disable('x-powered-by');
 
+  // Off by default: a hop is trusted only where every path to the API goes
+  // through it, because a trusted hop means a client can state its own address
+  // in X-Forwarded-For and the rate limiter believes it.
+  if (config.TRUST_PROXY > 0) {
+    app.set('trust proxy', config.TRUST_PROXY);
+  }
+
   app.use(requestId);
   app.use(
     pinoHttp({
@@ -65,12 +73,12 @@ export function createApp({ prisma, redis, publisher, connection, topology, conf
     app.use(cors({ origin: config.CORS_ORIGINS, credentials: true }));
   }
 
-  app.use(createHealthRouter({ prisma, redis, connection }));
+  app.use(createHealthRouter({ prisma, redis, connection, logger }));
   app.use(createDocsRouter());
   app.use(createMetricsRouter({ prisma, connection, topology, publishCounter, config, logger }));
 
   const publishService = createPublishService({ prisma, publisher, logger });
-  const authService = createAuthService({ prisma, config });
+  const authService = createAuthService({ prisma, config, logger });
   const projectService = createProjectService({ prisma, config });
   const apiKeyService = createApiKeyService({ prisma });
   const endpointService = createEndpointService({ prisma, config, publishService });
@@ -99,7 +107,7 @@ export function createApp({ prisma, redis, publisher, connection, topology, conf
         redis,
         limit: AUTH_ATTEMPTS_PER_MINUTE,
         keyPrefix: 'ratelimit:auth',
-        identify: (req) => req.ip,
+        identify: authRateLimitKey,
       }),
     }),
     createProjectRouter({

@@ -25,6 +25,37 @@ describe('classifyAddress', () => {
     expect(classifyAddress('::ffff:8.8.8.8')).toBe('public');
   });
 
+  it('judges a mapped address the same way in hex and in dotted notation', () => {
+    expect(classifyAddress('::ffff:7f00:1')).toBe('loopback');
+    expect(classifyAddress('::ffff:127.0.0.1')).toBe('loopback');
+    expect(classifyAddress('::ffff:a9fe:a9fe')).toBe('link-local');
+    expect(classifyAddress('::ffff:c0a8:1')).toBe('private');
+    expect(classifyAddress('::ffff:0a00:1')).toBe('private');
+    expect(classifyAddress('::127.0.0.1')).toBe('loopback');
+    expect(classifyAddress('64:ff9b::7f00:1')).toBe('loopback');
+    expect(classifyAddress('64:ff9b:1::a9fe:a9fe')).toBe('link-local');
+  });
+
+  it('leaves a genuinely public address public', () => {
+    expect(classifyAddress('2606:4700:4700::1111')).toBe('public');
+    expect(classifyAddress('::ffff:8.8.8.8')).toBe('public');
+    expect(classifyAddress('::ffff:0808:808')).toBe('public');
+  });
+
+  it('names the IPv4 blocks that are reserved for special use', () => {
+    expect(classifyAddress('0.1.2.3')).toBe('reserved');
+    expect(classifyAddress('192.0.0.8')).toBe('reserved');
+    expect(classifyAddress('192.0.2.5')).toBe('reserved');
+    expect(classifyAddress('198.18.0.1')).toBe('reserved');
+    expect(classifyAddress('198.19.255.255')).toBe('reserved');
+    expect(classifyAddress('198.51.100.7')).toBe('reserved');
+    expect(classifyAddress('203.0.113.7')).toBe('reserved');
+    expect(classifyAddress('240.0.0.1')).toBe('reserved');
+    expect(classifyAddress('198.20.0.1')).toBe('public');
+    expect(classifyAddress('192.0.1.1')).toBe('public');
+    expect(classifyAddress('203.1.113.7')).toBe('public');
+  });
+
   it('classifies the IPv6 ranges', () => {
     expect(classifyAddress('::1')).toBe('loopback');
     expect(classifyAddress('fe80::1')).toBe('link-local');
@@ -69,6 +100,20 @@ describe('resolveSafeTarget', () => {
     await expect(
       resolveSafeTarget('http://169.254.169.254/latest/meta-data', {}),
     ).rejects.toMatchObject({ reason: 'private_address' });
+  });
+
+  it('rejects an IPv4-mapped literal that URL normalisation rewrites into hex', async () => {
+    const literals = [
+      'http://[::ffff:127.0.0.1]/',
+      'http://[::ffff:a9fe:a9fe]/',
+      'http://[64:ff9b::7f00:1]/',
+    ];
+
+    for (const literal of literals) {
+      await expect(resolveSafeTarget(literal, {})).rejects.toMatchObject({
+        reason: 'private_address',
+      });
+    }
   });
 
   it('rejects a name that resolves to a public and a private address at once', async () => {

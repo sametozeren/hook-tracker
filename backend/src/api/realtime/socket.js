@@ -7,6 +7,16 @@ export const NAMESPACE = '/realtime';
 
 const MILLISECOND = 1000;
 
+// setTimeout keeps its delay in a signed 32-bit int: anything above this
+// overflows and fires at once, so a long JWT_ACCESS_TTL (up to 365d) would drop
+// every socket the moment it connected. Clamping closes the socket early
+// instead, and the client reconnects — the timer is only a safety net.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+export function socketExpiryDelay(expiresAtSeconds, nowMs = Date.now()) {
+  return Math.min(expiresAtSeconds * MILLISECOND - nowMs, MAX_TIMEOUT_MS);
+}
+
 function roomFor(projectId) {
   return `project:${projectId}`;
 }
@@ -77,7 +87,7 @@ export function attachRealtime({ server, prisma, redis, config, logger }) {
 
     // A socket outlives the access token that opened it. Revoking a session
     // would otherwise take effect never, rather than within the token's life.
-    const msUntilExpiry = socket.data.expiresAt * MILLISECOND - Date.now();
+    const msUntilExpiry = socketExpiryDelay(socket.data.expiresAt);
 
     if (msUntilExpiry <= 0) {
       socket.disconnect(true);

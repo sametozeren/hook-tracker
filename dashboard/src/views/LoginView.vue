@@ -3,11 +3,11 @@ import { onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth.js';
 import { useFieldErrors } from '../lib/field-errors.js';
+import { landingRoute } from '../lib/landing.js';
 import { ApiError } from '../lib/problem.js';
 import AuthFormError from '../components/AuthFormError.vue';
 import AuthLayout from '../components/AuthLayout.vue';
 import PasswordField from '../components/PasswordField.vue';
-import EmptyState from '../components/ui/EmptyState.vue';
 import UiButton from '../components/ui/UiButton.vue';
 
 const FIELDS = ['email', 'password'];
@@ -24,7 +24,6 @@ const password = ref('');
 const passwordVisible = ref(false);
 const submitting = ref(false);
 const formError = ref(null);
-const projectless = ref(false);
 const emailInput = ref(null);
 
 onMounted(() => {
@@ -96,15 +95,7 @@ function landAfterLogin() {
     return;
   }
 
-  const project = auth.projects[0];
-
-  if (!project) {
-    projectless.value = true;
-
-    return;
-  }
-
-  router.push({ name: 'deliveries', params: { projectId: project.id } });
+  router.push(landingRoute(auth));
 }
 
 async function submit() {
@@ -133,13 +124,7 @@ async function submit() {
 
 <template>
   <AuthLayout title="Sign in" subtitle="Watch every webhook this instance delivers.">
-    <EmptyState
-      v-if="projectless"
-      title="You are signed in, but no project is yours yet."
-      description="An owner has to add this email to a project before there is anything to watch. Sign in again once they have."
-    />
-
-    <form v-else novalidate class="space-y-5" @submit.prevent="submit">
+    <form novalidate class="space-y-5" @submit.prevent="submit">
       <AuthFormError
         v-if="formError"
         :message="formError.message"

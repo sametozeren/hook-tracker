@@ -11,6 +11,8 @@ const DAY_MS = 86_400_000;
 // turns the login route into an account-existence oracle.
 const CREDENTIALS_REJECTED = 'The email or the password is wrong';
 
+const REFRESH_REJECTED = 'The refresh token is unknown, revoked or expired';
+
 export function slugify(value) {
   const base = value
     .toLowerCase()
@@ -21,7 +23,7 @@ export function slugify(value) {
   return `${base || 'project'}-${randomBytes(3).toString('hex')}`;
 }
 
-export function createAuthService({ prisma, config, now = () => new Date() }) {
+export function createAuthService({ prisma, config, logger, now = () => new Date() }) {
   function issueAccessToken(userId) {
     return jwt.sign({ sub: userId }, config.JWT_SECRET, { expiresIn: config.JWT_ACCESS_TTL });
   }
@@ -49,6 +51,15 @@ export function createAuthService({ prisma, config, now = () => new Date() }) {
     };
   }
 
+  async function revokeFamily(userId) {
+    const revoked = await prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now() },
+    });
+
+    return revoked.count;
+  }
+
   async function usableToken(token) {
     if (!token) {
       throw new UnauthorizedError('No refresh token was presented');
@@ -56,8 +67,24 @@ export function createAuthService({ prisma, config, now = () => new Date() }) {
 
     const record = await prisma.refreshToken.findUnique({ where: { tokenHash: sha256Hex(token) } });
 
-    if (!record || record.revokedAt || record.expiresAt.getTime() <= now().getTime()) {
-      throw new UnauthorizedError('The refresh token is unknown, revoked or expired');
+    if (!record || record.expiresAt.getTime() <= now().getTime()) {
+      throw new UnauthorizedError(REFRESH_REJECTED);
+    }
+
+    // A revoked but still unexpired token coming back means two copies of it
+    // exist: the one that rotated it and this one. Which of the two is the
+    // thief cannot be told apart from here, so every live token of the account
+    // goes — the legitimate session drops with the stolen one, and the log line
+    // is the record that it happened.
+    if (record.revokedAt) {
+      const revokedCount = await revokeFamily(record.userId);
+
+      logger?.warn(
+        { userId: record.userId, refreshTokenId: record.id, revokedCount },
+        'revoked refresh token replayed; revoked every live token of the account',
+      );
+
+      throw new UnauthorizedError(REFRESH_REJECTED);
     }
 
     return record;
@@ -105,15 +132,23 @@ export function createAuthService({ prisma, config, now = () => new Date() }) {
     },
 
     // Rotation: the presented token is revoked as the new one is issued, so a
-    // stolen token is usable at most once, and its use invalidates the copy the
-    // legitimate client holds — which is how the theft becomes visible.
+    // stolen token is usable at most once. The revocation is the condition of
+    // the write, not a step after the read — two requests racing with the same
+    // token both pass usableToken, but only one updateMany matches a row that
+    // is still unrevoked, and the loser is refused instead of being handed a
+    // second independent session. Replaying an already revoked token is what
+    // usableToken turns into a family-wide revocation.
     async refresh({ token }) {
       const record = await usableToken(token);
 
-      await prisma.refreshToken.update({
-        where: { id: record.id },
+      const rotated = await prisma.refreshToken.updateMany({
+        where: { id: record.id, revokedAt: null },
         data: { revokedAt: now() },
       });
+
+      if (rotated.count !== 1) {
+        throw new UnauthorizedError(REFRESH_REJECTED);
+      }
 
       return session(record.userId);
     },

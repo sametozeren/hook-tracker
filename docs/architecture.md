@@ -167,6 +167,8 @@ After attempt 6 fails, the delivery is routed to `webhook.dlq`, marked `FAILED_P
 
 Any 4xx not named above is permanent as well: a request the receiver rejected does not become acceptable by being sent again.
 
+The SSRF guard classifies its own refusals the same way. A blocked scheme, a blocked port, an unparseable URL and an address in a private range are permanent — none of them becomes allowed by waiting. A name that did not resolve is retryable, because a resolver outage is not a configuration error, and treating it as one would fail every in-flight delivery permanently and count each one against its endpoint's health.
+
 Delays carry ±10% jitter, applied as a per-message `expiration` no greater than the queue TTL, so a recovering downstream host is not hit by a thundering herd. The cap makes the jitter one-sided in practice — the expiration can only shorten a delay, so the spread lands in the 10% below each level rather than around it.
 
 `MAX_ATTEMPTS` is not free-form: the ladder has exactly one queue per retry level, so the value must equal `retry levels + 1`. Startup validates this against the schedule and refuses to run on a mismatch. Changing the schedule means changing the queue set, and queue arguments are immutable — see the migration note in §4. Lowering `MAX_ATTEMPTS` to stop earlier is the only change that needs no new queue.
@@ -204,7 +206,7 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 
 ## 8. Idempotency & Deduplication
 
-- Clients may send an `Idempotency-Key` header. When absent, the key defaults to `sha256(eventType + canonicalJson(payload))`.
+- Clients may send an `Idempotency-Key` header. When absent, the key defaults to `sha256(eventType + canonicalJson(payload) + canonicalJson(sorted(unique(endpointIds))))`. The target set is part of the key because the same body aimed at a different endpoint is a different instruction: without it the second publish would replay the first and its endpoint would receive nothing. A publish that names no `endpointIds` hashes exactly as it did before, so keys already issued stay valid.
 - Redis key `idem:{projectId}:{sha256(key)}` stores the original 202 response body for `IDEMPOTENCY_TTL_SECONDS` (default 86400).
 - A repeat within the window returns the original response with `Idempotency-Replayed: true` and creates no new deliveries.
 - A concurrent duplicate (key reserved, response not yet stored) returns `409 Conflict`.
@@ -215,11 +217,11 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 - **Ingestion:** sliding-window counter in Redis per API key, `RATE_LIMIT_PUBLISH_PER_MINUTE` (default 600). Exceeding it returns `429` with `Retry-After` plus `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. Those three headers are on every publish response, not only on a rejection, so a client can slow down before it is refused. A rejected call is dropped from the window again: leaving it there would let a client that keeps hammering push its own window forward and never recover.
 - `ApiKey.lastUsedAt` is refreshed at most once a minute and never blocks the response. It is a convenience column, not an audit record, and writing it on every request would put a row lock in the hot ingestion path.
 - **Per-endpoint delivery:** token bucket in Redis keyed by endpoint, sized from `Endpoint.rateLimitPerMinute`. When the worker cannot take a token it publishes the message to `webhook.throttle.10s` and acks. This does not increment `attemptCount` and writes no `DeliveryAttempt` row.
-- **Auth routes:** a stricter per-IP limit to slow credential stuffing.
+- **Auth routes:** a stricter limit to slow credential stuffing, 20 attempts a minute, counted per address _and_ per account. Address alone is not enough: behind a reverse proxy every dashboard request arrives from the proxy, so one person's failed logins would lock everyone out. Account alone is not enough either — it would let anyone lock an account they know the address of. `TRUST_PROXY` (default 0) says how many proxies sit in front of the API and is what makes `req.ip` the caller rather than the proxy. It stays off unless every path to the API goes through those proxies, because a trusted hop means the caller states its own `X-Forwarded-For` and the limiter believes it.
 
 ## 10. Endpoint Health & Circuit Breaking
 
-`Endpoint.consecutiveFailures` increments on each permanent failure and resets on any success. The counter is written from the value read at the start of the attempt, so two workers failing against the same endpoint at the same moment can cost one increment rather than two — the threshold is a health signal, not an exact count. At `ENDPOINT_AUTO_DISABLE_THRESHOLD` (default 20) the endpoint moves to `DISABLED`, an `endpoint.disabled` event is emitted, and new publishes skip it — recorded as a `SKIPPED` delivery so the audit trail stays complete. Re-enabling is a manual dashboard action.
+`Endpoint.consecutiveFailures` increments on each permanent failure and resets on any success. The increment happens in the database rather than from the value read at the start of the attempt, so two workers failing against the same endpoint at the same moment cost two increments and the threshold means what it says. Crossing it is a separate conditional update, which is what makes the switch to `DISABLED` — and the event and alert that follow it — happen exactly once no matter how many workers cross the line together. At `ENDPOINT_AUTO_DISABLE_THRESHOLD` (default 20) the endpoint moves to `DISABLED`, an `endpoint.disabled` event is emitted, and new publishes skip it — recorded as a `SKIPPED` delivery so the audit trail stays complete. Re-enabling is a manual dashboard action.
 
 **Alerting.** A disabled endpoint delivers nothing, so the project is told rather than left to notice. A project that set `Project.alertWebhookUrl` receives a `POST` for three conditions: an endpoint was auto-disabled, the dead-letter queue crossed `ALERT_DLQ_THRESHOLD`, and a dependency became unreachable. The two instance-wide conditions go to every project that configured an address, because a stalled broker stalls all of them.
 
@@ -297,7 +299,7 @@ The GIN index on `payload` serves one query: the containment test behind the eve
 delivery.created    { deliveryId, eventId, endpointId, eventType, createdAt }
 delivery.attempted  { deliveryId, attempt, responseStatus, durationMs, nextAttemptAt }
 delivery.succeeded  { deliveryId, attempt, responseStatus, durationMs, completedAt }
-delivery.failed     { deliveryId, attempt, reason: RETRYABLE | PERMANENT | EXHAUSTED,
+delivery.failed     { deliveryId, attempt, reason: PERMANENT | EXHAUSTED,
                       errorCode, responseStatus, completedAt }
 endpoint.disabled   { endpointId, consecutiveFailures, disabledAt }
 ```
@@ -310,7 +312,7 @@ Payloads carry ids, never the webhook body or any secret; the dashboard fetches 
 
 ## 14. Observability
 
-- `GET /health` for liveness with no dependency checks; `GET /ready` verifies Postgres, Redis and RabbitMQ reachability.
+- `GET /health` for liveness with no dependency checks; `GET /ready` verifies Postgres, Redis and RabbitMQ reachability and answers `{ status, checks: [{ name, ok }] }`. Neither route is authenticated, so a failing check names the dependency but never why it failed: a client library's error text carries the internal host and port, and that belongs in the log rather than in a public response.
 - `GET /metrics` in Prometheus format:
 
 ```text
@@ -355,7 +357,7 @@ The `jobs` process runs three schedules:
 
 ## 16. Configuration Reference
 
-`DATABASE_URL`, `REDIS_URL`, `RABBITMQ_URL`, `PORT`, `NODE_ENV`, `LOG_LEVEL`,
+`DATABASE_URL`, `REDIS_URL`, `RABBITMQ_URL`, `PORT`, `TRUST_PROXY` (default 0), `NODE_ENV`, `LOG_LEVEL`,
 `JWT_SECRET`, `JWT_ACCESS_TTL`, `REFRESH_TOKEN_TTL_DAYS`, `SECRET_ENCRYPTION_KEY`, `CORS_ORIGINS` (empty by default),
 `DELIVERY_TIMEOUT_MS`, `DELIVERY_CONNECT_TIMEOUT_MS`, `MAX_ATTEMPTS`, `WORKER_PREFETCH`,
 `MAX_PAYLOAD_BYTES` (default 262144), `RESPONSE_SNIPPET_BYTES`,

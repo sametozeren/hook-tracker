@@ -166,6 +166,14 @@ There is no root workspace — never run `npm install` at the repository root.
 
 Only the dashboard and the API publish ports to the host.
 
+## Where it stops, and where you can help
+
+Everything described above is built, tested against real Postgres, Redis and RabbitMQ, and released. What is not built is written down rather than left for you to discover: [`docs/roadmap.md`](docs/roadmap.md) lists every gap found in a deliberate audit of the API surface, the operational topology, the dashboard, the specifications and the test suite.
+
+The gaps worth knowing before you run this for real: there is no CI pipeline, no backup procedure, no audit trail for dashboard actions, and `SECRET_ENCRYPTION_KEY` cannot be rotated. Registration is open to anyone who can reach the dashboard, where the intended model is an owner creating users. A member who is removed from a project keeps their open realtime socket until their access token expires.
+
+Each roadmap item says why it matters and how big it is, and most of them are self-contained enough to pick up without knowing the rest of the system. `CONTRIBUTING.md` carries the Definition of Done every change is held to.
+
 ## Documentation
 
 | Document                                                     | Contents                                                                                 |
@@ -177,6 +185,7 @@ Only the dashboard and the API publish ports to the host.
 | [`docs/code-review.md`](docs/code-review.md)                 | The rules every change is reviewed against                                               |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Phase order and completion state                                                         |
 | [`docs/receiving-webhooks.md`](docs/receiving-webhooks.md)   | For teams on the receiving end                                                           |
+| [`docs/roadmap.md`](docs/roadmap.md)                         | What is not built yet, why it matters, and how big each piece is                         |
 | [`CHANGELOG.md`](CHANGELOG.md)                               | What changed in each release, and what an upgrade has to do                              |
 
 ## Local development

@@ -67,6 +67,12 @@ function describe(result) {
 
 const NO_ALERTS = { notify: async () => ({ sent: false, skipped: 'not_configured' }) };
 
+// ssrf.js reports a name it could not resolve as `dns_failure`. A resolver that
+// is briefly unreachable says nothing about the endpoint, so the delivery walks
+// the ladder; every other reason is a property of the URL itself and stays
+// permanent.
+const RETRYABLE_TARGET_REASONS = new Set(['dns_failure']);
+
 export function createDeliveryHandler({
   prisma,
   publisher,
@@ -81,8 +87,27 @@ export function createDeliveryHandler({
   now = () => new Date(),
   buildHeaders = deliveryHeaders,
 }) {
-  async function commit(operations) {
-    await prisma.$transaction(operations);
+  function commit(operations) {
+    return prisma.$transaction(operations);
+  }
+
+  function nextRetryLevel({ classification, attempt, retryAfter }) {
+    if (!shouldRetry({ classification, attempt, maxAttempts: config.MAX_ATTEMPTS })) {
+      return null;
+    }
+
+    return selectRetryLevel({
+      attempt,
+      maxAttempts: config.MAX_ATTEMPTS,
+      schedule,
+      retryAfterSeconds: retryAfter,
+    });
+  }
+
+  function failureReason(classification) {
+    return classification === FAILURE.PERMANENT
+      ? DELIVERY_FAILURE_REASON.PERMANENT
+      : DELIVERY_FAILURE_REASON.EXHAUSTED;
   }
 
   async function finaliseSuccess({ delivery, attempt, result, completedAt }) {
@@ -157,12 +182,12 @@ export function createDeliveryHandler({
 
   async function finaliseFailure({ delivery, attempt, result, reason, completedAt }) {
     const { endpoint } = delivery;
-    const failures = endpoint.consecutiveFailures + 1;
-    const disable =
-      endpoint.status === ENDPOINT_STATUS.ACTIVE &&
-      failures >= config.ENDPOINT_AUTO_DISABLE_THRESHOLD;
 
-    await commit([
+    // The increment is computed by the database, not from the value this worker
+    // read when it picked the delivery up: workers failing against the same
+    // endpoint at the same moment would otherwise overwrite each other and the
+    // counter would climb slower than the failures it counts.
+    const [, , counted] = await commit([
       prisma.deliveryAttempt.create({ data: attemptRow(delivery.id, attempt, result) }),
       prisma.delivery.update({
         where: { id: delivery.id },
@@ -176,12 +201,24 @@ export function createDeliveryHandler({
       }),
       prisma.endpoint.update({
         where: { id: endpoint.id },
-        data: {
-          consecutiveFailures: failures,
-          ...(disable ? { status: ENDPOINT_STATUS.DISABLED } : {}),
-        },
+        data: { consecutiveFailures: { increment: 1 } },
       }),
     ]);
+
+    const failures = counted.consecutiveFailures;
+
+    // Only the update that actually flips the row matches, so concurrent
+    // workers crossing the threshold together announce the disable once.
+    const { count } = await prisma.endpoint.updateMany({
+      where: {
+        id: endpoint.id,
+        status: ENDPOINT_STATUS.ACTIVE,
+        consecutiveFailures: { gte: config.ENDPOINT_AUTO_DISABLE_THRESHOLD },
+      },
+      data: { status: ENDPOINT_STATUS.DISABLED },
+    });
+
+    const disable = count > 0;
 
     await publisher.publishDeadLetter({ deliveryId: delivery.id, attempt });
 
@@ -287,17 +324,31 @@ export function createDeliveryHandler({
         durationMs: 0,
       };
 
+      const classification = RETRYABLE_TARGET_REASONS.has(error.reason)
+        ? FAILURE.RETRYABLE
+        : FAILURE.PERMANENT;
+
+      const level = nextRetryLevel({ classification, attempt });
+
+      logger?.warn({ deliveryId: delivery.id, attempt, reason: error.reason }, 'target rejected');
+
+      if (level) {
+        await finaliseRetry({ delivery, attempt, result, level, at: now() });
+
+        return { outcome: 'retrying', level: level.level };
+      }
+
       await finaliseFailure({
         delivery,
         attempt,
         result,
-        reason: DELIVERY_FAILURE_REASON.PERMANENT,
+        reason: failureReason(classification),
         completedAt: now(),
       });
 
-      logger?.warn({ deliveryId: delivery.id, attempt, reason: error.reason }, 'target rejected');
-
-      return { outcome: 'ssrf_blocked' };
+      return {
+        outcome: classification === FAILURE.PERMANENT ? 'ssrf_blocked' : 'failed_permanently',
+      };
     }
 
     const headers = buildHeaders({
@@ -326,16 +377,12 @@ export function createDeliveryHandler({
     }
 
     const classification = classifyFailure({ responseStatus: result.responseStatus });
-    const retrying = shouldRetry({ classification, attempt, maxAttempts: config.MAX_ATTEMPTS });
 
-    const level = retrying
-      ? selectRetryLevel({
-          attempt,
-          maxAttempts: config.MAX_ATTEMPTS,
-          schedule,
-          retryAfterSeconds: retryAfterSeconds(result.responseHeaders),
-        })
-      : null;
+    const level = nextRetryLevel({
+      classification,
+      attempt,
+      retryAfter: retryAfterSeconds(result.responseHeaders),
+    });
 
     if (level) {
       await finaliseRetry({ delivery, attempt, result, level, at: now() });
@@ -347,10 +394,7 @@ export function createDeliveryHandler({
       delivery,
       attempt,
       result,
-      reason:
-        classification === FAILURE.PERMANENT
-          ? DELIVERY_FAILURE_REASON.PERMANENT
-          : DELIVERY_FAILURE_REASON.EXHAUSTED,
+      reason: failureReason(classification),
       completedAt: now(),
     });
 

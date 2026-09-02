@@ -32,8 +32,8 @@
 
 - **Runner:** Vitest. **Integration:** Testcontainers with real Postgres, Redis and RabbitMQ — no broker or database mocks.
 - The integration files share one stack, started once by `tests/support/global-setup.js` (`npm run test:integration`, `vitest.integration.config.js`). Isolation comes from a per-file queue namespace and a per-file project row, not from a container each. `npm run test:docker` runs the standalone environment probe, which deliberately sits outside that setup so a Docker fault is told apart from a code fault.
-- Required integration coverage: the full retry ladder to the DLQ, manual replay, idempotent republish, endpoint rate-limit parking, SSRF rejection, HMAC signature verification against an independent implementation, and worker restart during an in-flight delivery.
-- Unit tests cover pure logic: retry-level selection, failure classification, signature construction, and env schema parsing.
+- Required integration coverage: the full retry ladder to the DLQ, manual replay, idempotent republish, endpoint rate-limit parking, SSRF rejection, a signed request accepted by the demo receiver over the real HTTP chain, and worker restart during an in-flight delivery.
+- Unit tests cover pure logic: retry-level selection, failure classification, signature construction against an independent implementation (`node:crypto`, not `src/shared/hmac.js`), and env schema parsing.
 - Tests never depend on wall-clock sleeps for the retry ladder; the schedule is injected so intervals collapse to milliseconds under test.
 - There is no CI pipeline. Lint, unit tests, integration tests, `prisma validate` and the Docker build are run locally before a change is considered done, and the observed output is the evidence — a claim that they pass is not.
 

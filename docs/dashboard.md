@@ -13,7 +13,7 @@ Vue 3 (Composition API, `<script setup>`) with TailwindCSS, built by Vite and se
 
 ### Login / Register
 
-Email and password. Register is only offered when the instance has no user yet — the first account creates its project and becomes `OWNER`. Failed login says the credentials are wrong without revealing which half.
+Email and password. Registration is open to anyone: it creates a new project and makes the registering user its `OWNER`, and an email already in use is rejected with `409`. Failed login says the credentials are wrong without revealing which half. The intended model is an owner creating users for their own project, with open registration closing once the first one exists; that change is not built yet and is tracked in `docs/roadmap.md`.
 
 ### Shell
 

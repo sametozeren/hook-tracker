@@ -6,6 +6,7 @@ import { assertTopology, createTopology } from '../../src/shared/queue/topology.
 import { createRealtimePublisher } from '../../src/shared/realtime.js';
 import { createTokenBucket } from '../../src/shared/token-bucket.js';
 import { createAlertDispatcher } from '../../src/shared/alerts.js';
+import { SsrfBlockedError } from '../../src/shared/ssrf.js';
 import { createDeliveryHandler } from '../../src/worker/handle-delivery.js';
 import { recordInto } from '../support/consume.js';
 import {
@@ -285,6 +286,50 @@ describe('ssrf guard', () => {
     expect(delivery.attempts[0].responseStatus).toBeNull();
     expect((await receivedRequests()).count).toBe(before);
   });
+
+  it('sends a delivery down the ladder when the name could not be resolved', async () => {
+    const retried = [];
+
+    // A handler of its own: the retry it publishes must not reach the shared
+    // consumer, which would resolve the name for real on the way back.
+    const unresolvable = createDeliveryHandler({
+      prisma,
+      publisher: {
+        publishRetry: async (message) => retried.push(message),
+        publishDeadLetter: async () => {},
+        publishThrottle: async () => {},
+      },
+      realtime: createRealtimePublisher({ redis: clients.redis }),
+      tokenBucket: createTokenBucket({ redis: clients.redis }),
+      config: handlerConfig,
+      schedule,
+      resolveTarget: async () => {
+        throw new SsrfBlockedError('dns_failure', 'resolver.example does not resolve');
+      },
+    });
+
+    const endpoint = await createEndpoint({ url: `${RECEIVER_URL}/ok` });
+    const created = await createDelivery(endpoint);
+
+    const outcome = await unresolvable({ deliveryId: created.id, attempt: 1 });
+
+    expect(outcome.outcome).toBe('retrying');
+
+    const delivery = await loadDelivery(created.id);
+
+    expect(delivery.status).toBe('RETRYING');
+    expect(delivery.attempts).toHaveLength(1);
+    expect(delivery.attempts[0].errorCode).toBe('SSRF_BLOCKED');
+    expect(delivery.nextAttemptAt).not.toBeNull();
+    expect(retried).toEqual([{ deliveryId: created.id, attempt: 2, level: schedule[0].level }]);
+
+    // A resolver outage says nothing about the endpoint, so its health is
+    // untouched and it cannot be auto-disabled by one.
+    const after = await prisma.endpoint.findUnique({ where: { id: endpoint.id } });
+
+    expect(after.consecutiveFailures).toBe(0);
+    expect(after.status).toBe('ACTIVE');
+  });
 });
 
 describe('at-least-once delivery', () => {
@@ -360,6 +405,55 @@ describe('endpoint rate limit', () => {
 });
 
 describe('endpoint health', () => {
+  async function failTwiceAtOnce(endpoint) {
+    const [first, second] = await Promise.all([createDelivery(endpoint), createDelivery(endpoint)]);
+
+    await Promise.all([
+      handler({ deliveryId: first.id, attempt: 1 }),
+      handler({ deliveryId: second.id, attempt: 1 }),
+    ]);
+  }
+
+  it('counts both failures when two deliveries fail against one endpoint at once', async () => {
+    const endpoint = await createEndpoint({ url: `${RECEIVER_URL}/unknown-route` });
+
+    await failTwiceAtOnce(endpoint);
+
+    const after = await prisma.endpoint.findUnique({ where: { id: endpoint.id } });
+
+    expect(after.consecutiveFailures).toBe(2);
+  });
+
+  it('announces the auto-disable once when two failures cross the threshold together', async () => {
+    handlerConfig.ENDPOINT_AUTO_DISABLE_THRESHOLD = 1;
+
+    try {
+      const endpoint = await createEndpoint({ url: `${RECEIVER_URL}/unknown-route` });
+
+      await failTwiceAtOnce(endpoint);
+
+      const after = await prisma.endpoint.findUnique({ where: { id: endpoint.id } });
+
+      expect(after.status).toBe('DISABLED');
+
+      const disabledEvents = () =>
+        realtimeEvents.filter(
+          (entry) =>
+            entry.event === 'endpoint.disabled' && entry.payload.endpointId === endpoint.id,
+        );
+
+      await waitFor(() => disabledEvents().length > 0);
+
+      // Both workers saw the threshold crossed; only the one that flipped the
+      // row may say so, or an operator is paged twice for one endpoint.
+      await wait(300);
+
+      expect(disabledEvents()).toHaveLength(1);
+    } finally {
+      handlerConfig.ENDPOINT_AUTO_DISABLE_THRESHOLD = 20;
+    }
+  });
+
   it('disables an endpoint that reaches the consecutive failure threshold', async () => {
     handlerConfig.ENDPOINT_AUTO_DISABLE_THRESHOLD = 1;
 

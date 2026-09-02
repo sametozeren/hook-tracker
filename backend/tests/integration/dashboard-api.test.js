@@ -1,8 +1,11 @@
+import express from 'express';
 import jwt from 'jsonwebtoken';
 import { io as connectSocket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { attachRealtime } from '../../src/api/realtime/socket.js';
 import { REFRESH_COOKIE } from '../../src/api/routes/auth.js';
+import { createHealthRouter } from '../../src/api/routes/health.js';
+import { createAuthService } from '../../src/api/services/auth-service.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { createRealtimePublisher } from '../../src/shared/realtime.js';
 import { newId } from '../../src/shared/ids.js';
@@ -16,6 +19,9 @@ import {
   startApi,
   testConfig,
 } from '../support/stack.js';
+
+// Mirrors AUTH_ATTEMPTS_PER_MINUTE in src/api/app.js, which is not exported.
+const AUTH_ATTEMPTS_PER_MINUTE = 20;
 
 const topology = createTopology({ namespace: 'itest-dashboard' });
 
@@ -193,8 +199,135 @@ describe('authentication', () => {
     expect((await call('POST', '/v1/auth/refresh', { cookie: second })).status).toBe(401);
   });
 
+  // Two requests carrying the same cookie must not both mint a session: a
+  // single stolen cookie would otherwise become two independent logins.
+  it('lets exactly one of two concurrent refreshes with the same token win', async () => {
+    const login = await call('POST', '/v1/auth/login', {
+      body: { email: 'bob@hook-tracker.test', password: 'a-long-enough-password' },
+    });
+
+    const cookie = refreshCookieOf(login);
+
+    const [first, second] = await Promise.all([
+      call('POST', '/v1/auth/refresh', { cookie }),
+      call('POST', '/v1/auth/refresh', { cookie }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([200, 401]);
+  });
+
+  // Over HTTP the two requests usually serialise on their own, so the read of
+  // the second lands after the write of the first and the race never forms.
+  // Holding both reads open until both have happened is what actually puts the
+  // conditional write under test.
+  it('refuses the loser of a rotation race even when both reads see a live token', async () => {
+    let arrived = 0;
+    let openTheGate;
+
+    const gate = new Promise((resolve) => {
+      openTheGate = resolve;
+    });
+
+    async function waitForBoth() {
+      arrived += 1;
+
+      if (arrived === 2) {
+        openTheGate();
+      }
+
+      await gate;
+    }
+
+    const bind = (target, property) => {
+      const value = target[property];
+
+      return typeof value === 'function' ? value.bind(target) : value;
+    };
+
+    const gatedPrisma = new Proxy(prisma, {
+      get(target, property) {
+        if (property !== 'refreshToken') {
+          return bind(target, property);
+        }
+
+        return new Proxy(target.refreshToken, {
+          get(delegate, method) {
+            if (method !== 'findUnique') {
+              return bind(delegate, method);
+            }
+
+            return async (args) => {
+              const record = await delegate.findUnique(args);
+
+              await waitForBoth();
+
+              return record;
+            };
+          },
+        });
+      },
+    });
+
+    const service = createAuthService({ prisma: gatedPrisma, config: appConfig, logger });
+    const opened = await service.login({
+      email: 'bob@hook-tracker.test',
+      password: 'a-long-enough-password',
+    });
+
+    const outcomes = await Promise.allSettled([
+      service.refresh({ token: opened.refresh.token }),
+      service.refresh({ token: opened.refresh.token }),
+    ]);
+
+    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(outcomes.find((outcome) => outcome.status === 'rejected').reason.status).toBe(401);
+  });
+
+  it('revokes the whole family when a token that was already rotated comes back', async () => {
+    const login = await call('POST', '/v1/auth/login', {
+      body: { email: 'bob@hook-tracker.test', password: 'a-long-enough-password' },
+    });
+
+    const stolen = refreshCookieOf(login);
+    const rotated = await call('POST', '/v1/auth/refresh', { cookie: stolen });
+
+    expect(rotated.status).toBe(200);
+
+    const issued = refreshCookieOf(rotated);
+    const replayed = await call('POST', '/v1/auth/refresh', { cookie: stolen });
+
+    expect(replayed.status).toBe(401);
+
+    const afterFamilyRevoked = await call('POST', '/v1/auth/refresh', { cookie: issued });
+
+    expect(afterFamilyRevoked.status).toBe(401);
+  });
+
   it('rejects a request with no access token', async () => {
     expect((await call('GET', '/v1/auth/me')).status).toBe(401);
+  });
+
+  // Behind the dashboard's nginx every login arrives from one address, so a
+  // counter keyed on the address alone would let one account's failures lock
+  // everyone else out.
+  it('spends the login attempt limit per account, not per address', async () => {
+    const attempt = (email) =>
+      call('POST', '/v1/auth/login', { body: { email, password: 'wrong-password-entirely' } });
+
+    const spent = [];
+
+    for (let i = 0; i < AUTH_ATTEMPTS_PER_MINUTE + 1; i += 1) {
+      spent.push((await attempt('lockout-a@hook-tracker.test')).status);
+    }
+
+    expect(spent.slice(0, AUTH_ATTEMPTS_PER_MINUTE)).toEqual(
+      Array(AUTH_ATTEMPTS_PER_MINUTE).fill(401),
+    );
+    expect(spent.at(-1)).toBe(429);
+
+    const other = await attempt('lockout-b@hook-tracker.test');
+
+    expect(other.status).toBe(401);
   });
 });
 
@@ -759,5 +892,196 @@ describe('realtime', () => {
     expect(reason).toBe('token_expired');
 
     socket.disconnect();
+  });
+});
+
+describe('endpoint authorization', () => {
+  let member;
+  let guarded;
+
+  beforeAll(async () => {
+    member = await register('carol@hook-tracker.test', 'Carol Project');
+
+    const added = await call('POST', `/v1/projects/${alice.project.id}/members`, {
+      token: alice.token,
+      body: { email: 'carol@hook-tracker.test', role: 'MEMBER' },
+    });
+
+    expect(added.status).toBe(201);
+    expect(added.body.role).toBe('MEMBER');
+
+    const created = await call('POST', `/v1/projects/${alice.project.id}/endpoints`, {
+      token: alice.token,
+      body: { url: 'http://localhost:4000/ok', eventTypes: ['authz.probe'] },
+    });
+
+    expect(created.status).toBe(201);
+
+    guarded = created.body;
+  });
+
+  it('refuses a member who tries to point an endpoint at another URL', async () => {
+    const response = await call('PATCH', `/v1/endpoints/${guarded.id}`, {
+      token: member.token,
+      body: { url: 'http://localhost:4000/attacker' },
+    });
+
+    expect(response.status).toBe(403);
+
+    const stored = await prisma.endpoint.findUnique({ where: { id: guarded.id } });
+
+    expect(stored.url).toBe(guarded.url);
+  });
+
+  it('refuses a member who tries to disable or enable an endpoint', async () => {
+    const disabled = await call('POST', `/v1/endpoints/${guarded.id}/disable`, {
+      token: member.token,
+    });
+
+    expect(disabled.status).toBe(403);
+
+    const enabled = await call('POST', `/v1/endpoints/${guarded.id}/enable`, {
+      token: member.token,
+    });
+
+    expect(enabled.status).toBe(403);
+
+    const stored = await prisma.endpoint.findUnique({ where: { id: guarded.id } });
+
+    expect(stored.status).toBe('ACTIVE');
+  });
+
+  it('refuses a member who tries to rotate the secret or delete the endpoint', async () => {
+    const rotated = await call('POST', `/v1/endpoints/${guarded.id}/rotate-secret`, {
+      token: member.token,
+    });
+
+    expect(rotated.status).toBe(403);
+
+    const removed = await call('DELETE', `/v1/endpoints/${guarded.id}`, {
+      token: member.token,
+    });
+
+    expect(removed.status).toBe(403);
+  });
+
+  it('lets a member send a test event, the operational twin of replay', async () => {
+    const response = await call('POST', `/v1/endpoints/${guarded.id}/test`, {
+      token: member.token,
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.body.deliveries.map((delivery) => delivery.endpointId)).toEqual([guarded.id]);
+  });
+
+  it('lets the owner run every endpoint action the member was refused', async () => {
+    const updated = await call('PATCH', `/v1/endpoints/${guarded.id}`, {
+      token: alice.token,
+      body: { description: 'owner may rename' },
+    });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.description).toBe('owner may rename');
+
+    const disabled = await call('POST', `/v1/endpoints/${guarded.id}/disable`, {
+      token: alice.token,
+    });
+
+    expect(disabled.status).toBe(200);
+    expect(disabled.body.status).toBe('DISABLED');
+
+    const enabled = await call('POST', `/v1/endpoints/${guarded.id}/enable`, {
+      token: alice.token,
+    });
+
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.status).toBe('ACTIVE');
+
+    const tested = await call('POST', `/v1/endpoints/${guarded.id}/test`, {
+      token: alice.token,
+    });
+
+    expect(tested.status).toBe(202);
+  });
+
+  // The distinction is deliberate: a non-member must not be able to tell an
+  // endpoint they may not touch from one that does not exist.
+  it('still answers 404, not 403, to a member of another project', async () => {
+    const patched = await call('PATCH', `/v1/endpoints/${guarded.id}`, {
+      token: bob.token,
+      body: { description: 'stolen' },
+    });
+
+    expect(patched.status).toBe(404);
+
+    const disabled = await call('POST', `/v1/endpoints/${guarded.id}/disable`, {
+      token: bob.token,
+    });
+
+    expect(disabled.status).toBe(404);
+
+    const tested = await call('POST', `/v1/endpoints/${guarded.id}/test`, {
+      token: bob.token,
+    });
+
+    expect(tested.status).toBe(404);
+  });
+});
+
+describe('GET /ready', () => {
+  // The probe messages name the internal host and port of a failing dependency,
+  // and the endpoint takes no credentials, so the body carries the verdict only.
+  async function readyOf(router) {
+    const app = express();
+
+    app.use(router);
+
+    const listener = app.listen(0);
+
+    await new Promise((resolve) => listener.once('listening', resolve));
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${listener.address().port}/ready`);
+
+      return { status: response.status, body: await readJson(response) };
+    } finally {
+      listener.close();
+    }
+  }
+
+  it('names each dependency and its verdict', async () => {
+    const response = await call('GET', '/ready');
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('ready');
+
+    for (const check of response.body.checks) {
+      expect(Object.keys(check).sort()).toEqual(['name', 'ok']);
+    }
+  });
+
+  it('keeps the reason a dependency is down out of the body', async () => {
+    const refused = (address) => () => {
+      throw new Error(`connect ECONNREFUSED ${address}`);
+    };
+
+    const response = await readyOf(
+      createHealthRouter({
+        prisma: { $queryRaw: refused('10.0.3.14:5432') },
+        redis: { ping: refused('10.0.3.15:6379') },
+        connection: { createChannel: refused('10.0.3.16:5672') },
+        logger,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.body.status).toBe('degraded');
+    expect(response.body.checks.map((check) => check.ok)).toEqual([false, false, false]);
+
+    for (const check of response.body.checks) {
+      expect(Object.keys(check).sort()).toEqual(['name', 'ok']);
+    }
+
+    expect(JSON.stringify(response.body)).not.toContain('ECONNREFUSED');
   });
 });

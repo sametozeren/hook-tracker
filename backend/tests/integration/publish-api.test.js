@@ -3,7 +3,7 @@ import { generateApiKey } from '../../src/shared/crypto.js';
 import { newId } from '../../src/shared/ids.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { recordInto } from '../support/consume.js';
-import { createEndpoint, createProject } from '../support/fixtures.js';
+import { createDelivery, createEndpoint, createProject } from '../support/fixtures.js';
 import { waitFor } from '../support/poll.js';
 import {
   closeClients,
@@ -27,6 +27,9 @@ let project;
 let activeEndpoint;
 let disabledEndpoint;
 let foreignEndpoint;
+let targetOnlyEndpoint;
+let owner;
+let ownerEndpoint;
 let apiKey;
 
 const queued = [];
@@ -47,6 +50,35 @@ async function publish(body, { key = apiKey, headers = {} } = {}) {
     headers: response.headers,
     body: await readJson(response),
   };
+}
+
+async function callAsOwner(method, path) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: { authorization: `Bearer ${owner.accessToken}` },
+  });
+
+  return { status: response.status, headers: response.headers, body: await readJson(response) };
+}
+
+async function registerOwner() {
+  const stamp = Date.now();
+  const response = await fetch(`${baseUrl}/v1/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: `publish-replay-${stamp}@hook-tracker.test`,
+      password: 'a-long-enough-password',
+      name: 'publish-replay',
+      projectName: `Publish Replay ${stamp}`,
+    }),
+  });
+
+  return readJson(response);
+}
+
+function deliveryCount() {
+  return prisma.delivery.count({ where: { event: { projectId: project.id } } });
 }
 
 async function createApiKeyRow(name) {
@@ -88,12 +120,27 @@ beforeAll(async () => {
     url: 'http://receiver:4000/ok',
   });
 
+  // Subscribed to something no test publishes, so it only ever receives a
+  // delivery when a request names it in endpointIds.
+  targetOnlyEndpoint = await createEndpoint(prisma, {
+    projectId: project.id,
+    url: 'http://receiver:4000/ok',
+    eventTypes: ['billing.charged'],
+  });
+
   ({ server, baseUrl } = await startApi({
     clients,
     topology,
     config: testConfig({ RATE_LIMIT_PUBLISH_PER_MINUTE: RATE_LIMIT, MAX_PAYLOAD_BYTES }),
     logger: silentLogger(),
   }));
+
+  owner = await registerOwner();
+
+  ownerEndpoint = await createEndpoint(prisma, {
+    projectId: owner.project.id,
+    url: 'http://receiver:4000/ok',
+  });
 });
 
 // The limiter counts per API key, so every test gets its own and one test's
@@ -158,6 +205,45 @@ describe('POST /v1/publish', () => {
     expect(await prisma.delivery.count({ where: { event: { projectId: project.id } } })).toBe(
       before,
     );
+  });
+
+  it('does not replay across the same body sent to a different endpoint set', async () => {
+    const body = { eventType: 'order.shipped', payload: { marker: newId('event') } };
+
+    const first = await publish({ ...body, endpointIds: [activeEndpoint.id] });
+    const second = await publish({ ...body, endpointIds: [targetOnlyEndpoint.id] });
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(second.headers.get('idempotency-replayed')).toBeNull();
+    expect(second.body.eventId).not.toBe(first.body.eventId);
+    expect(first.body.deliveries.map((delivery) => delivery.endpointId)).toEqual([
+      activeEndpoint.id,
+    ]);
+    expect(second.body.deliveries.map((delivery) => delivery.endpointId)).toEqual([
+      targetOnlyEndpoint.id,
+    ]);
+  });
+
+  it('replays the same body sent to the same endpoint set with no Idempotency-Key', async () => {
+    const body = {
+      eventType: 'order.shipped',
+      payload: { marker: newId('event') },
+      endpointIds: [targetOnlyEndpoint.id, activeEndpoint.id],
+    };
+
+    const first = await publish(body);
+    const before = await deliveryCount();
+    const second = await publish({
+      ...body,
+      endpointIds: [activeEndpoint.id, targetOnlyEndpoint.id],
+    });
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(second.body).toEqual(first.body);
+    expect(second.headers.get('idempotency-replayed')).toBe('true');
+    expect(await deliveryCount()).toBe(before);
   });
 
   it('refuses an event type that nothing subscribes to', async () => {
@@ -229,6 +315,45 @@ describe('POST /v1/publish', () => {
     expect(limited.headers.get('ratelimit-limit')).toBe(String(RATE_LIMIT));
     expect(limited.headers.get('ratelimit-remaining')).toBe('0');
     expect(accepted[0].headers.get('ratelimit-remaining')).toBe(String(RATE_LIMIT - 1));
+  });
+});
+
+describe('POST /v1/deliveries/:deliveryId/replay', () => {
+  async function seed(status) {
+    return createDelivery(prisma, {
+      projectId: owner.project.id,
+      endpointId: ownerEndpoint.id,
+      status,
+    });
+  }
+
+  it('refuses a delivery that has not finished its attempt ladder', async () => {
+    const pending = await seed('PENDING');
+    const inFlight = await seed('IN_FLIGHT');
+
+    const refusedPending = await callAsOwner('POST', `/v1/deliveries/${pending.id}/replay`);
+    const refusedInFlight = await callAsOwner('POST', `/v1/deliveries/${inFlight.id}/replay`);
+
+    expect(refusedPending.status).toBe(409);
+    expect(refusedPending.body.type).toBe('urn:hook-tracker:error:conflict');
+    expect(refusedPending.body.detail).toContain('PENDING');
+    expect(refusedInFlight.status).toBe(409);
+    expect(refusedInFlight.body.detail).toContain('IN_FLIGHT');
+
+    expect(
+      await prisma.delivery.count({ where: { replayedFromId: { in: [pending.id, inFlight.id] } } }),
+    ).toBe(0);
+  });
+
+  it('accepts a delivery that already reached a terminal status', async () => {
+    for (const status of ['SUCCEEDED', 'FAILED_PERMANENTLY']) {
+      const original = await seed(status);
+      const response = await callAsOwner('POST', `/v1/deliveries/${original.id}/replay`);
+
+      expect(response.status).toBe(202);
+      expect(response.body.replayedFromId).toBe(original.id);
+      expect(response.body.status).toBe('PENDING');
+    }
   });
 });
 

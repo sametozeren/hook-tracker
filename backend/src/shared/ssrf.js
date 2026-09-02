@@ -16,7 +16,7 @@ export class SsrfBlockedError extends Error {
 }
 
 export function classifyIpv4(address) {
-  const [first, second] = address.split('.').map(Number);
+  const [first, second, third] = address.split('.').map(Number);
 
   if (first === 0) return 'reserved';
 
@@ -30,7 +30,17 @@ export function classifyIpv4(address) {
 
   if (first === 172 && second >= 16 && second <= 31) return 'private';
 
+  if (first === 192 && second === 0 && third === 0) return 'reserved';
+
+  if (first === 192 && second === 0 && third === 2) return 'reserved';
+
   if (first === 192 && second === 168) return 'private';
+
+  if (first === 198 && (second === 18 || second === 19)) return 'reserved';
+
+  if (first === 198 && second === 51 && third === 100) return 'reserved';
+
+  if (first === 203 && second === 0 && third === 113) return 'reserved';
 
   if (first >= 224 && first <= 239) return 'multicast';
 
@@ -39,35 +49,99 @@ export function classifyIpv4(address) {
   return 'public';
 }
 
+function expandIpv4Suffix(groups) {
+  const last = groups.at(-1);
+
+  if (!last?.includes('.')) return groups;
+
+  const [a, b, c, d] = last.split('.').map(Number);
+
+  return [
+    ...groups.slice(0, -1),
+    (((a << 8) | b) >>> 0).toString(16),
+    (((c << 8) | d) >>> 0).toString(16),
+  ];
+}
+
+function splitGroups(part) {
+  return part === '' ? [] : expandIpv4Suffix(part.split(':'));
+}
+
+function ipv6ToBytes(address) {
+  const [head, tail, extra] = address.toLowerCase().split('::');
+
+  if (extra !== undefined) return null;
+
+  const leading = splitGroups(head);
+  const trailing = tail === undefined ? [] : splitGroups(tail);
+  const gap = 8 - leading.length - trailing.length;
+  const groups =
+    tail === undefined
+      ? leading
+      : [...leading, ...Array.from({ length: gap }, () => '0'), ...trailing];
+
+  if (groups.length !== 8 || gap < 0) return null;
+
+  const bytes = new Uint8Array(16);
+
+  for (let index = 0; index < 8; index += 1) {
+    const group = Number.parseInt(groups[index], 16);
+
+    if (!Number.isInteger(group) || group < 0 || group > 0xffff) return null;
+
+    bytes[index * 2] = group >>> 8;
+    bytes[index * 2 + 1] = group & 0xff;
+  }
+
+  return bytes;
+}
+
+function isZeroRange(bytes, start, end) {
+  for (let index = start; index < end; index += 1) {
+    if (bytes[index] !== 0) return false;
+  }
+
+  return true;
+}
+
+function ipv4At(bytes, offsets) {
+  return offsets.map((offset) => bytes[offset]).join('.');
+}
+
+const EMBEDDED_IPV4_OFFSETS = [12, 13, 14, 15];
+
 export function classifyIpv6(address) {
-  const value = address.toLowerCase();
+  const bytes = ipv6ToBytes(address);
 
-  if (value === '::1') return 'loopback';
+  if (!bytes) return 'unknown';
 
-  if (value === '::') return 'reserved';
+  // WHATWG URL normalises [::ffff:127.0.0.1] to ::ffff:7f00:1, so a mapped or
+  // embedded IPv4 address is only visible at the byte level, never in the text.
+  if (isZeroRange(bytes, 0, 10)) {
+    if (bytes[10] === 0xff && bytes[11] === 0xff) {
+      return classifyIpv4(ipv4At(bytes, EMBEDDED_IPV4_OFFSETS));
+    }
 
-  // An IPv4-mapped address reaches the same host as the address it embeds, so
-  // it is judged by the embedded value rather than by its IPv6 form.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
+    if (bytes[10] === 0 && bytes[11] === 0) {
+      if (isZeroRange(bytes, 12, 16)) return 'reserved';
 
-  if (mapped) {
-    return classifyIpv4(mapped[1]);
+      if (isZeroRange(bytes, 12, 15) && bytes[15] === 1) return 'loopback';
+
+      return classifyIpv4(ipv4At(bytes, EMBEDDED_IPV4_OFFSETS));
+    }
   }
 
-  const head = value.slice(0, 4);
+  const nat64 = bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b;
 
-  if (
-    head.startsWith('fe8') ||
-    head.startsWith('fe9') ||
-    head.startsWith('fea') ||
-    head.startsWith('feb')
-  ) {
-    return 'link-local';
+  if (nat64 && (isZeroRange(bytes, 4, 12) || (bytes[4] === 0x00 && bytes[5] === 0x01))) {
+    return classifyIpv4(ipv4At(bytes, EMBEDDED_IPV4_OFFSETS));
   }
 
-  if (head.startsWith('fc') || head.startsWith('fd')) return 'unique-local';
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return 'link-local';
 
-  if (head.startsWith('ff')) return 'multicast';
+  if ((bytes[0] & 0xfe) === 0xfc) return 'unique-local';
+
+  if (bytes[0] === 0xff) return 'multicast';
 
   return 'public';
 }

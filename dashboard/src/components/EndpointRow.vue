@@ -82,7 +82,7 @@ const disabledReason = computed(() =>
           so this page cannot show a time. Enabling it resumes delivery and resets the consecutive
           failure count to 0.
         </p>
-        <div class="mt-2">
+        <div v-if="isOwner" class="mt-2">
           <UiButton size="sm" :loading="busyAction === 'enable'" @click="$emit('enable')">
             Enable
           </UiButton>
@@ -111,7 +111,7 @@ const disabledReason = computed(() =>
       </div>
 
       <div class="flex flex-wrap gap-1.5 md:justify-end">
-        <UiButton size="sm" variant="quiet" @click="$emit('edit')">Edit</UiButton>
+        <UiButton v-if="isOwner" size="sm" variant="quiet" @click="$emit('edit')">Edit</UiButton>
         <UiButton size="sm" variant="quiet" :loading="busyAction === 'test'" @click="$emit('test')">
           Send test event
         </UiButton>
@@ -124,24 +124,26 @@ const disabledReason = computed(() =>
         >
           Rotate secret
         </UiButton>
-        <UiButton
-          v-if="endpoint.status === 'ACTIVE'"
-          size="sm"
-          variant="quiet"
-          :loading="busyAction === 'disable'"
-          @click="$emit('disable')"
-        >
-          Disable
-        </UiButton>
-        <UiButton
-          v-else
-          size="sm"
-          variant="quiet"
-          :loading="busyAction === 'enable'"
-          @click="$emit('enable')"
-        >
-          Enable
-        </UiButton>
+        <template v-if="isOwner">
+          <UiButton
+            v-if="endpoint.status === 'ACTIVE'"
+            size="sm"
+            variant="quiet"
+            :loading="busyAction === 'disable'"
+            @click="$emit('disable')"
+          >
+            Disable
+          </UiButton>
+          <UiButton
+            v-else
+            size="sm"
+            variant="quiet"
+            :loading="busyAction === 'enable'"
+            @click="$emit('enable')"
+          >
+            Enable
+          </UiButton>
+        </template>
         <UiButton v-if="isOwner" size="sm" variant="quiet" @click="$emit('delete')">
           Delete
         </UiButton>

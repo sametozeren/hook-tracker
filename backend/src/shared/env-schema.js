@@ -20,6 +20,7 @@ const durationString = z.string().regex(/^\d+[smhd]$/, 'must be a duration such 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   DATABASE_URL: z.string().min(1).startsWith('postgres'),

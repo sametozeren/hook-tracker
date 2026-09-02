@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** Phases 0-7 complete and released as `v0.1.0`, every acceptance check run and observed. Phase 8 is planned and not started. Last updated 2026-09-02.
+**Status:** Phases 0-8 complete and released as `v0.2.0`, every acceptance check run and observed. Last updated 2026-09-03.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 

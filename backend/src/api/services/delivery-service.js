@@ -1,8 +1,10 @@
 import { REPLAYABLE_STATUSES } from '../../shared/delivery-status.js';
-import { NotFoundError } from '../../shared/errors.js';
+import { ConflictError, NotFoundError } from '../../shared/errors.js';
 import { newId } from '../../shared/ids.js';
 import { assertMembership } from '../authorization.js';
 import { decodeCursor, olderThan, paginate } from './keyset.js';
+
+const REPLAYABLE_LIST = [...REPLAYABLE_STATUSES].sort().join(', ');
 
 function deliveryView(delivery) {
   return {
@@ -126,6 +128,13 @@ export function createDeliveryService({ prisma, publisher, config, logger }) {
     // old one: the original attempt history stays exactly as it happened.
     async replay({ deliveryId, auth }) {
       const original = await loadForCaller({ deliveryId, auth, include: { event: true } });
+
+      if (!REPLAYABLE_STATUSES.has(original.status)) {
+        throw new ConflictError(
+          `A delivery in ${original.status} is still on its way out, so replaying it would only queue a duplicate; replay accepts ${REPLAYABLE_LIST}`,
+        );
+      }
+
       const replay = await prisma.delivery.create({
         data: {
           id: newId('delivery'),

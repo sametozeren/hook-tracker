@@ -128,17 +128,19 @@ A list row carries `deliveryCount` and `byStatus`, the fan-out of that event cou
 
 ## Deliveries
 
-| Method | Path                                             | Purpose                                                                      |
-| ------ | ------------------------------------------------ | ---------------------------------------------------------------------------- |
-| GET    | `/v1/projects/:projectId/deliveries`             | cursor pagination; filters `status`, `endpointId`, `eventType`, `from`, `to` |
-| GET    | `/v1/deliveries/:deliveryId`                     | delivery with its full attempt list                                          |
-| POST   | `/v1/deliveries/:deliveryId/replay`              | new Delivery row, `replayedFromId` set                                       |
-| POST   | `/v1/projects/:projectId/deliveries/bulk-replay` | replays a filtered set, capped at `BULK_REPLAY_LIMIT`                        |
-| GET    | `/v1/projects/:projectId/stats`                  | counts by status and a delivery-latency summary for the dashboard header     |
+| Method | Path                                             | Purpose                                                                        |
+| ------ | ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| GET    | `/v1/projects/:projectId/deliveries`             | cursor pagination; filters `status`, `endpointId`, `eventType`, `from`, `to`   |
+| GET    | `/v1/deliveries/:deliveryId`                     | delivery with its full attempt list                                            |
+| POST   | `/v1/deliveries/:deliveryId/replay`              | new Delivery row, `replayedFromId` set; `409` if the original has not finished |
+| POST   | `/v1/projects/:projectId/deliveries/bulk-replay` | replays a filtered set, capped at `BULK_REPLAY_LIMIT`                          |
+| GET    | `/v1/projects/:projectId/stats`                  | counts by status and a delivery-latency summary for the dashboard header       |
 
 Listing uses keyset pagination (`?cursor=&limit=`) rather than `OFFSET`, because the delivery table grows without bound. A page is `{ deliveries, nextCursor }`, and `nextCursor` is `null` on the last page. The cursor encodes `createdAt` and `id` together: `createdAt` alone is not unique, and a boundary that fell inside a group of same-millisecond rows would repeat or skip them.
 
 A list row carries the delivery fields plus `eventType`, `receivedAt`, `lastResponseStatus` and `lastDurationMs` — the `responseStatus` and `durationMs` of the delivery's newest attempt, both `null` when no attempt has been recorded yet, and `lastResponseStatus` `null` when the attempt errored before a response. Those four are list-only: the single-delivery response carries the full `attempts` array instead.
+
+Replay is offered for a delivery that has stopped — `SUCCEEDED`, `FAILED_PERMANENTLY`, `SKIPPED` — and for one still walking the ladder in `RETRYING`, so an operator who fixed the endpoint does not have to wait out the remaining attempts. A delivery that is `PENDING` or `IN_FLIGHT` is refused with `409`: it is still on its way out, and replaying it would only queue a duplicate. Bulk replay skips those rows instead of refusing the batch, and says so in its `replayed` count.
 
 `bulk-replay` answers `{ matched, replayed, cappedAt, deliveries }`. `matched` counts the rows the filter selected, `replayed` counts those that were in a state worth replaying, and `cappedAt` reports the limit that was applied — a silent truncation would read as "everything was replayed".
 
