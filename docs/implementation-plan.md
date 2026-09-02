@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** All phases complete, every acceptance check run and observed. Last updated 2026-09-01.
+**Status:** Phases 0-7 complete and released as `v0.1.0`, every acceptance check run and observed. Phase 8 is planned and not started. Last updated 2026-09-02.
 
 Ordered phases. Each one ends in something that runs and can be checked, so a broken phase is caught before the next depends on it. Do not start a phase until its predecessor's acceptance check passes. Update the status line above when a phase closes, so a session that starts with no memory of this one knows where the work stands.
 
@@ -21,14 +21,17 @@ Applies to every phase, in addition to its own acceptance check:
 
 Places where the work is likely to stall. Listed here rather than in the specs because they concern building, not behavior.
 
-| Risk | Phase | Handling |
-|---|---|---|
-| Prisma client generation and import paths under ESM need extra configuration | 1 | Resolved: the v7 `prisma-client` generator emits TypeScript into `src/generated/prisma`, which Node 24 runs directly through type stripping, and v7 requires a driver adapter (`@prisma/adapter-pg`). Both are contained in `shared/db.js`, the only module that imports the generated client. A Node older than 24 cannot run the client without `--experimental-strip-types`, which is why `engines` pins 24 |
-| RabbitMQ queue arguments are immutable — a wrong TTL yields `PRECONDITION_FAILED` on restart | 2 | Resolved: `npm run queue:reset` inspects every queue first and refuses to delete one that still holds messages unless `--force` is passed; it also refuses to run with `NODE_ENV=production`. The broker is not published to the host, so it is used as `docker compose run --rm api npm run queue:reset` |
-| Testcontainers on Windows and Docker Desktop: slow starts, socket path configuration | 2 | Resolved: `tests/integration/docker-environment.test.js` starts a bare alpine container, so an environment fault is told apart from a code fault at a glance. One broker is started per test file and stopped in `afterAll`; container reuse is not enabled while a single file needs a broker, and is the next step if that changes |
-| Connecting to a pinned IP while keeping TLS valid | 4 | Resolved: a fresh `undici` Agent per attempt whose `connect.lookup` returns the verified address. The request is still made against the original URL, so SNI and the `Host` header carry the hostname and certificate validation is unaffected. One agent per attempt rather than a pooled one, because a pinned address belongs to a single attempt |
-| Socket.io fan-out across replicas only misbehaves with more than one API instance | 5 | Resolved: the worker's pub/sub message reaches every API instance, so each one emits to its **local** sockets and the adapter is not used for that path — emitting through it would send one copy per replica. An integration test runs a second API instance against the same Redis and asserts a client connected to it receives exactly one copy |
-| Refresh cookie behind the Vite dev server behaves differently than behind nginx | 6 | Dev server proxies `/v1` to the API so the cookie stays same-origin; cookie `Path` and CORS credentials verified in both setups |
+| Risk                                                                                         | Phase | Handling                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prisma client generation and import paths under ESM need extra configuration                 | 1     | Resolved: the v7 `prisma-client` generator emits TypeScript into `src/generated/prisma`, which Node 24 runs directly through type stripping, and v7 requires a driver adapter (`@prisma/adapter-pg`). Both are contained in `shared/db.js`, the only module that imports the generated client. A Node older than 24 cannot run the client without `--experimental-strip-types`, which is why `engines` pins 24 |
+| RabbitMQ queue arguments are immutable — a wrong TTL yields `PRECONDITION_FAILED` on restart | 2     | Resolved: `npm run queue:reset` inspects every queue first and refuses to delete one that still holds messages unless `--force` is passed; it also refuses to run with `NODE_ENV=production`. The broker is not published to the host, so it is used as `docker compose run --rm api npm run queue:reset`                                                                                                      |
+| Testcontainers on Windows and Docker Desktop: slow starts, socket path configuration         | 2     | Resolved: `tests/integration/docker-environment.test.js` starts a bare alpine container, so an environment fault is told apart from a code fault at a glance. One broker is started per test file and stopped in `afterAll`; container reuse is not enabled while a single file needs a broker, and is the next step if that changes                                                                           |
+| Connecting to a pinned IP while keeping TLS valid                                            | 4     | Resolved: a fresh `undici` Agent per attempt whose `connect.lookup` returns the verified address. The request is still made against the original URL, so SNI and the `Host` header carry the hostname and certificate validation is unaffected. One agent per attempt rather than a pooled one, because a pinned address belongs to a single attempt                                                           |
+| Socket.io fan-out across replicas only misbehaves with more than one API instance            | 5     | Resolved: the worker's pub/sub message reaches every API instance, so each one emits to its **local** sockets and the adapter is not used for that path — emitting through it would send one copy per replica. An integration test runs a second API instance against the same Redis and asserts a client connected to it receives exactly one copy                                                            |
+| Refresh cookie behind the Vite dev server behaves differently than behind nginx              | 6     | Dev server proxies `/v1` to the API so the cookie stays same-origin; cookie `Path` and CORS credentials verified in both setups                                                                                                                                                                                                                                                                                |
+| A per-project alert URL is user input, so it can point at the internal network               | 8     | It goes through `resolveSafeTarget`, the same guard endpoint URLs use, when it is saved. The dispatcher never follows it without that check, and the failure surfaces on the settings form rather than at send time                                                                                                                                                                                            |
+| Payload search can outgrow its index and turn the events list into a sequential scan         | 8     | Search is exact containment on a caller-supplied path and value, served by a GIN index on `payload`. Free-text substring search is deliberately out of scope: it needs a trigram index over the whole document, whose write cost lands on the ingestion path                                                                                                                                                   |
+| An alert storm can bury the signal it is meant to raise                                      | 8     | A Redis suppression window per alert source, `ALERT_SUPPRESSION_MINUTES`. A channel that reports the same endpoint every minute gets muted by its reader, which is the same as having no alerting                                                                                                                                                                                                              |
 
 ## Phase 0 — Repository skeleton
 
@@ -137,3 +140,47 @@ Two gaps the API leaves open, recorded here rather than in the specs because the
 - [x] README: what it does, 60-second quickstart, architecture diagram, screenshot or GIF, link to `docs/receiving-webhooks.md`
 
 **Acceptance:** every check green on a clean checkout; following only the README, a new user goes from clone to a delivered webhook. Observed: lint, format and `prisma validate` clean in both packages, 165 unit tests and 55 integration tests pass, `docker compose up -d --build` brings all eight services up healthy, `jobs` logs both schedules running, and `/docs`, `/openapi.json` and `/metrics` answer with the documented shapes.
+
+## Phase 8 — Visibility and alerting
+
+Three independent steps, smallest first, each shippable on its own. None of them changes the wire contract or the queue topology, so an existing deployment upgrades by pulling and restarting.
+
+**8.1 — The dead-letter queue stops growing without a bound**
+
+Nothing consumes `webhook.dlq`. The message it holds carries `deliveryId` and `attempt`, both of which the committed `Delivery` row already carries, so the queue is redundant for replay and useful only as a signal: `hooktracker_dlq_size` answers "how much failed for good" without a query. Expiry is set per message rather than on the queue, because queue arguments are immutable and a `x-message-ttl` argument would turn this into a topology migration for every existing deployment.
+
+- [x] `DLQ_MESSAGE_TTL_HOURS` in the env schema, default 24
+- [x] `publisher.publishDeadLetter` sets `expiration` on the message it publishes
+- [x] `.env.example` and `docs/architecture.md` §4 carry the new value
+- [x] Release note: messages published before this version have no expiry and are purged once, by hand
+
+**Acceptance:** an integration test configured with a short TTL sees the `expiration` property on the message the worker dead-letters, and sees the message gone from the queue after it elapses, against a real broker. `hooktracker_dlq_size` returns to zero without a consumer.
+
+**8.2 — A project can be told when something breaks**
+
+An endpoint that fails `ENDPOINT_AUTO_DISABLE_THRESHOLD` times in a row is disabled and nothing is delivered to it after that. Today the only way to learn this is to open the dashboard. The alert is operational — it is addressed to whoever runs the instance, not to the endpoint's owner — so it is configured per project, not per endpoint.
+
+- [ ] `Project.alertWebhookUrl`, optional, and its migration
+- [ ] The URL is validated through `resolveSafeTarget` when it is saved, and a blocked target is rejected with `422` on the settings form, exactly as an endpoint URL is
+- [ ] `src/shared/alerts.js` — one place that builds the body and sends it: short timeout, no retry, failures logged and never propagated into the delivery path
+- [ ] Three triggers: an endpoint was auto-disabled (worker), the dead-letter queue crossed its threshold (jobs), a dependency became unreachable (jobs)
+- [ ] `ALERT_SUPPRESSION_MINUTES` (default 60) — a Redis window per alert source, so one broken endpoint cannot produce an alert a minute
+- [ ] The body carries project, endpoint id, reason and time. It carries no payload, no secret and no API key
+- [ ] Owner-only field on the settings screen; `docs/api.md`, `docs/dashboard.md` and `docs/architecture.md` §10 updated
+- [ ] Requests are unsigned in this version. A receiver that needs provenance is the reason to revisit it, and that reason has not appeared yet
+
+**Acceptance:** an integration test drives an endpoint to its auto-disable threshold and sees the alert arrive at a stub receiver; a second disable inside the suppression window sends nothing; an alert URL pointing at a private address is refused with `422` when saved; a receiver that times out leaves the delivery pipeline untouched and the failure appears only in the log.
+
+**8.3 — Events are queryable, and payloads are searchable**
+
+The events screen groups the delivery rows it has already loaded, because the API has no event endpoint — the gap phase 6 recorded. Search closes the question an operator actually asks: which event carried this order, and what happened to it.
+
+- [ ] `GET /v1/projects/:projectId/events` — keyset pagination, filters `eventType`, `from`, `to`
+- [ ] Exact-containment payload search on a caller-supplied path and value, served by a GIN index on `WebhookEvent.payload`
+- [ ] `GET /v1/events/:eventId` — the event with the deliveries it produced
+- [ ] The events screen reads this endpoint and drops the note explaining that it groups loaded rows
+- [ ] `docs/api.md`, `docs/dashboard.md` and `docs/architecture.md` §11 updated; the phase 6 gap note closed
+
+**Acceptance:** an integration test publishes one event that fans out to three endpoints, sees it as a single row on the events endpoint carrying its three deliveries, finds it by a value inside its payload, and does not find another project's event holding the same value. `EXPLAIN` shows the search using the index rather than a sequential scan.
+
+**Phase acceptance:** all three steps complete, every check in the Definition of Done run and observed, and the work released as `v0.2.0` — changelog entries moved out of `[Unreleased]`, both `package.json` versions bumped, tag and GitHub release created.

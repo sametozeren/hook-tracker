@@ -12,7 +12,16 @@ function messageFor(deliveryId, attempt) {
   return Buffer.from(JSON.stringify({ deliveryId, attempt }), 'utf8');
 }
 
-export function createPublisher({ channel, topology = createTopology(), random = Math.random }) {
+const HOUR_MS = 60 * 60 * 1000;
+
+export const DEFAULT_DEAD_LETTER_TTL_MS = 24 * HOUR_MS;
+
+export function createPublisher({
+  channel,
+  topology = createTopology(),
+  random = Math.random,
+  deadLetterTtlMs = DEFAULT_DEAD_LETTER_TTL_MS,
+}) {
   function publish(exchange, routingKey, payload, options = {}) {
     return new Promise((resolve, reject) => {
       channel.publish(
@@ -70,11 +79,15 @@ export function createPublisher({ channel, topology = createTopology(), random =
       );
     },
 
+    // The expiry travels on the message rather than as an x-message-ttl queue
+    // argument: queue arguments are immutable, so setting it on the queue would
+    // make this a topology migration for every deployment that already runs.
     async publishDeadLetter({ deliveryId, attempt }) {
       return publish(
         topology.exchanges.dlx,
         topology.deadLetterRoutingKey,
         messageFor(deliveryId, attempt),
+        { expiration: String(deadLetterTtlMs) },
       );
     },
   };

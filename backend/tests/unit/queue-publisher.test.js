@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newId } from '../../src/shared/ids.js';
-import { createPublisher } from '../../src/shared/queue/publisher.js';
+import { DEFAULT_DEAD_LETTER_TTL_MS, createPublisher } from '../../src/shared/queue/publisher.js';
 import { createTopology } from '../../src/shared/queue/topology.js';
 
 function createRecordingChannel() {
@@ -75,13 +75,25 @@ describe('createPublisher', () => {
     expect(message.options.expiration).toBeUndefined();
   });
 
-  it('sends a terminal failure to the dead letter exchange', async () => {
+  it('sends a terminal failure to the dead letter exchange, with an expiry on the message', async () => {
     const channel = createRecordingChannel();
     const publisher = createPublisher({ channel });
 
     await publisher.publishDeadLetter({ deliveryId, attempt: 6 });
 
-    expect(lastMessage(channel).exchange).toBe('webhook.dlx');
+    const message = lastMessage(channel);
+
+    expect(message.exchange).toBe('webhook.dlx');
+    expect(message.options.expiration).toBe(String(DEFAULT_DEAD_LETTER_TTL_MS));
+  });
+
+  it('takes the dead letter expiry from its option', async () => {
+    const channel = createRecordingChannel();
+    const publisher = createPublisher({ channel, deadLetterTtlMs: 1_800_000 });
+
+    await publisher.publishDeadLetter({ deliveryId, attempt: 6 });
+
+    expect(lastMessage(channel).options.expiration).toBe('1800000');
   });
 
   it('rejects an id from another entity and a malformed attempt', async () => {

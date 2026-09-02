@@ -1,6 +1,7 @@
 # hook-tracker — System Architecture & Technical Specification
 
 ## 1. Purpose & Problem Statement
+
 hook-tracker is a distributed intermediary layer (webhook gateway) designed to reliably deliver outbound HTTP notifications (webhooks) from client backend services to third-party endpoints, ensuring zero data loss even if recipient servers are down, slow, or unstable.
 
 It ships as a self-contained repository: `docker compose up` must bring up the full stack (Postgres, Redis, RabbitMQ, API, worker, dashboard, demo receiver) with no manual step beyond copying `.env.example`.
@@ -27,16 +28,16 @@ hook-tracker/
 
 A single image is built from `backend/`; the `api`, `worker`, `jobs` and `receiver` compose services differ only by `command`. Workers scale independently via `deploy.replicas`.
 
-| Service | Port | Notes |
-|---|---|---|
-| api | 3000 | Express + Socket.io |
-| dashboard | 8080 | nginx serving the built Vue app, proxies `/v1` and `/socket.io` to api |
-| worker | – | no exposed port, N replicas |
-| jobs | – | retention + stuck-delivery sweeper |
-| receiver | 4000 | demo target that simulates 500 / slow / flaky responses |
-| postgres | 5432 | |
-| redis | 6379 | |
-| rabbitmq | 5672 / 15672 | official image, no plugin required |
+| Service   | Port         | Notes                                                                  |
+| --------- | ------------ | ---------------------------------------------------------------------- |
+| api       | 3000         | Express + Socket.io                                                    |
+| dashboard | 8080         | nginx serving the built Vue app, proxies `/v1` and `/socket.io` to api |
+| worker    | –            | no exposed port, N replicas                                            |
+| jobs      | –            | retention + stuck-delivery sweeper                                     |
+| receiver  | 4000         | demo target that simulates 500 / slow / flaky responses                |
+| postgres  | 5432         |                                                                        |
+| redis     | 6379         |                                                                        |
+| rabbitmq  | 5672 / 15672 | official image, no plugin required                                     |
 
 Node 24 LTS is the pinned runtime, declared identically in `engines`, `.nvmrc` and the Docker base image. Only `dashboard` (8080) and `api` (3000) publish ports to the host; `/metrics` is mounted on the API listener, so it rides the published `api` port and is reachable from the host, not just the Docker network. A real deployment must block it at the reverse proxy. Its low-cardinality labels (§14) are what keep this non-sensitive.
 
@@ -50,13 +51,13 @@ Seeding is a separate opt-in command (`docker compose run --rm migrate npm run s
 
 The bundled receiver exists so a fresh clone can watch the retry ladder without an external service. It logs every request with its headers and verifies the signature, then responds by route:
 
-| Route | Behavior |
-|---|---|
-| `POST /ok` | `200` immediately |
-| `POST /fail-500` | `500` always — drives a delivery to the DLQ |
-| `POST /slow?ms=` | responds after the given delay, default 12000, exceeding `DELIVERY_TIMEOUT_MS` |
-| `POST /flaky?rate=` | fails with `503` at the given probability, default 0.5 |
-| `GET /received` | the last 100 requests as JSON, for assertions in tests |
+| Route               | Behavior                                                                       |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `POST /ok`          | `200` immediately                                                              |
+| `POST /fail-500`    | `500` always — drives a delivery to the DLQ                                    |
+| `POST /slow?ms=`    | responds after the given delay, default 12000, exceeding `DELIVERY_TIMEOUT_MS` |
+| `POST /flaky?rate=` | fails with `503` at the given probability, default 0.5                         |
+| `GET /received`     | the last 100 requests as JSON, for assertions in tests                         |
 
 Seed data points the demo endpoint at `http://receiver:4000/flaky?rate=0.7`, so the first minutes of a fresh install show retries, successes and a permanent failure. The seed writes a fixed signing secret taken from `DEMO_ENDPOINT_SECRET`, and the receiver reads the same variable, which is how it can verify signatures without any wiring between the two processes. That variable is demo-only and is documented as such in `.env.example`.
 
@@ -103,9 +104,9 @@ An `eventType` matches `^[a-z0-9]+([._-][a-z0-9]+)*$`, at most 64 characters —
 
 `Endpoint.eventTypes` selects what an endpoint receives:
 
-* empty array — every event type of the project
-* exact entries — `order.created` matches only that type
-* one trailing wildcard segment — `order.*` matches `order.created` and `order.paid`, but not `order.line.added`; `*` alone is rejected, since an empty array already means that and two ways to say one thing invite mistakes
+- empty array — every event type of the project
+- exact entries — `order.created` matches only that type
+- one trailing wildcard segment — `order.*` matches `order.created` and `order.paid`, but not `order.line.added`; `*` alone is rejected, since an empty array already means that and two ways to say one thing invite mistakes
 
 When `endpointIds` is supplied explicitly it overrides subscription matching, but never project scoping: an id belonging to another project is rejected with `422`, and the response never reveals whether that id exists.
 
@@ -117,21 +118,23 @@ A matching endpoint that is `DISABLED` still counts as a match: the event is acc
 
 Delayed retries use per-level TTL queues that dead-letter back into the main queue. This requires no RabbitMQ plugin, so the official image works unmodified and a fresh clone needs no custom broker build.
 
-| Object | Type | Config |
-|---|---|---|
-| `webhook.exchange` | direct exchange | main routing |
-| `webhook.delivery` | queue | bound with key `delivery`; consumed by workers |
-| `webhook.retry` | direct exchange | receives retry publishes |
-| `webhook.retry.1m` | queue | `x-message-ttl: 60000`, DLX `webhook.exchange`, DLK `delivery`, no consumer |
-| `webhook.retry.5m` | queue | `x-message-ttl: 300000`, same DLX |
-| `webhook.retry.30m` | queue | `x-message-ttl: 1800000`, same DLX |
-| `webhook.retry.2h` | queue | `x-message-ttl: 7200000`, same DLX |
-| `webhook.retry.6h` | queue | `x-message-ttl: 21600000`, same DLX |
-| `webhook.throttle.10s` | queue | `x-message-ttl: 10000`, same DLX — endpoint rate-limit parking, does not count as an attempt |
-| `webhook.dlx` | direct exchange | terminal failures |
-| `webhook.dlq` | queue | no TTL, no consumer; inspected and replayed from the dashboard |
+| Object                 | Type            | Config                                                                                       |
+| ---------------------- | --------------- | -------------------------------------------------------------------------------------------- |
+| `webhook.exchange`     | direct exchange | main routing                                                                                 |
+| `webhook.delivery`     | queue           | bound with key `delivery`; consumed by workers                                               |
+| `webhook.retry`        | direct exchange | receives retry publishes                                                                     |
+| `webhook.retry.1m`     | queue           | `x-message-ttl: 60000`, DLX `webhook.exchange`, DLK `delivery`, no consumer                  |
+| `webhook.retry.5m`     | queue           | `x-message-ttl: 300000`, same DLX                                                            |
+| `webhook.retry.30m`    | queue           | `x-message-ttl: 1800000`, same DLX                                                           |
+| `webhook.retry.2h`     | queue           | `x-message-ttl: 7200000`, same DLX                                                           |
+| `webhook.retry.6h`     | queue           | `x-message-ttl: 21600000`, same DLX                                                          |
+| `webhook.throttle.10s` | queue           | `x-message-ttl: 10000`, same DLX — endpoint rate-limit parking, does not count as an attempt |
+| `webhook.dlx`          | direct exchange | terminal failures                                                                            |
+| `webhook.dlq`          | queue           | no consumer; every message carries a `DLQ_MESSAGE_TTL_HOURS` expiry, 24h by default          |
 
 Each retry level needs its own queue because RabbitMQ expires messages only from the head of a queue; mixing TTLs in one queue would block short delays behind long ones.
+
+**The dead-letter queue is a signal, not a store.** Its message carries `deliveryId` and `attempt`, both of which the committed `Delivery` row already holds, so replay reads Postgres and never the queue — which leaves the queue with one job: `hooktracker_dlq_size` answers "how much failed for good" without a query. Nothing consumes it, so the expiry is what keeps it bounded, and it is set on each message rather than as an `x-message-ttl` queue argument: arguments are immutable, so putting it on the queue would make this a migration for every deployment that already runs. Every message carries the same value, so they expire in the order they arrived and the head never blocks.
 
 **Message body:** `{ deliveryId, attempt }` only. Payload and endpoint secret are read from Postgres by the worker, so the broker never stores secrets, messages stay small, and a manual replay is a plain re-publish.
 
@@ -145,21 +148,22 @@ Topology is declared idempotently at API and worker startup from one `shared/que
 
 Maximum **6 HTTP attempts**: 1 initial delivery plus 5 retries.
 
-| Attempt | Delay before it | Queue |
-|---|---|---|
-| 1 | immediate | `webhook.delivery` |
-| 2 | 1 minute | `webhook.retry.1m` |
-| 3 | 5 minutes | `webhook.retry.5m` |
-| 4 | 30 minutes | `webhook.retry.30m` |
-| 5 | 2 hours | `webhook.retry.2h` |
-| 6 | 6 hours | `webhook.retry.6h` |
+| Attempt | Delay before it | Queue               |
+| ------- | --------------- | ------------------- |
+| 1       | immediate       | `webhook.delivery`  |
+| 2       | 1 minute        | `webhook.retry.1m`  |
+| 3       | 5 minutes       | `webhook.retry.5m`  |
+| 4       | 30 minutes      | `webhook.retry.30m` |
+| 5       | 2 hours         | `webhook.retry.2h`  |
+| 6       | 6 hours         | `webhook.retry.6h`  |
 
 After attempt 6 fails, the delivery is routed to `webhook.dlq`, marked `FAILED_PERMANENTLY`, and automated retries cease. Manual replay from the dashboard creates a new Delivery row referencing the same WebhookEvent, with a fresh attempt counter and `replayedFromId` set.
 
 **Failure classification:**
-* Retryable — connection errors, DNS failures, request timeout, `408`, `425`, `429`, all `5xx`.
-* Permanent (no retry, immediate `FAILED_PERMANENTLY`) — `400`, `401`, `403`, `404`, `410`, `422`, and any `3xx`, since redirects are not followed and a redirecting endpoint is a configuration error.
-* When the response carries `Retry-After` and its value exceeds the scheduled delay, the next larger retry level is used instead.
+
+- Retryable — connection errors, DNS failures, request timeout, `408`, `425`, `429`, all `5xx`.
+- Permanent (no retry, immediate `FAILED_PERMANENTLY`) — `400`, `401`, `403`, `404`, `410`, `422`, and any `3xx`, since redirects are not followed and a redirecting endpoint is a configuration error.
+- When the response carries `Retry-After` and its value exceeds the scheduled delay, the next larger retry level is used instead.
 
 Any 4xx not named above is permanent as well: a request the receiver rejected does not become acceptable by being sent again.
 
@@ -169,30 +173,30 @@ Delays carry ±10% jitter, applied as a per-message `expiration` no greater than
 
 ## 6. Delivery Execution Rules
 
-* Timeouts are split: 3000 ms connect, 10000 ms total (`DELIVERY_TIMEOUT_MS`).
-* Redirects are never followed (`redirect: manual`).
-* The request body is the exact stored JSONB serialization, and the same bytes are signed.
-* Response capture: status, duration, a whitelisted header subset — `content-type`, `content-length`, `retry-after`, `date`, `x-request-id` — and the first 8 KB of the body.
-* An endpoint disabled while one of its messages is already queued turns that delivery into `SKIPPED` rather than sending it: the endpoint row is read at attempt time, and disabling is meant to stop traffic immediately.
-* An unexpected error inside the handler — one that is neither an HTTP result nor a guard rejection — requeues the message once. A message that fails twice is acked and its delivery is left `IN_FLIGHT` for the stuck sweeper, because requeueing forever would spin on a message this worker cannot process at all.
-* **SSRF guard (mandatory).** The target host is resolved before connecting and rejected when it maps to loopback, private (RFC1918), link-local (including `169.254.169.254`), CGNAT, multicast or reserved ranges. The resolved IP is pinned for the connection so DNS cannot be re-pointed between check and connect. `SSRF_ALLOW_PRIVATE` defaults to `false`; the compose demo sets `SSRF_ALLOWLIST_HOSTS=receiver` so only the bundled receiver is reachable inside the Docker network.
-* Only `http` and `https` schemes are accepted; non-standard ports can be blocked via `SSRF_BLOCKED_PORTS`.
-* The endpoint row is read at attempt time, not captured when the event was published. A URL or secret edited between attempts applies to the next retry, which is what makes fixing a wrong URL and waiting for the retry a valid recovery path. The event payload, by contrast, is immutable once ingested.
-* **Acknowledgement:** the message is acked only after the HTTP attempt is finalized and the `DeliveryAttempt` row plus the `Delivery` status update are committed in one transaction. A worker crash before commit causes redelivery, so the system is **at-least-once** and receivers must deduplicate on `X-Webhook-Id`. Consumer `prefetch` is `WORKER_PREFETCH` (default 10).
+- Timeouts are split: 3000 ms connect, 10000 ms total (`DELIVERY_TIMEOUT_MS`).
+- Redirects are never followed (`redirect: manual`).
+- The request body is the exact stored JSONB serialization, and the same bytes are signed.
+- Response capture: status, duration, a whitelisted header subset — `content-type`, `content-length`, `retry-after`, `date`, `x-request-id` — and the first 8 KB of the body.
+- An endpoint disabled while one of its messages is already queued turns that delivery into `SKIPPED` rather than sending it: the endpoint row is read at attempt time, and disabling is meant to stop traffic immediately.
+- An unexpected error inside the handler — one that is neither an HTTP result nor a guard rejection — requeues the message once. A message that fails twice is acked and its delivery is left `IN_FLIGHT` for the stuck sweeper, because requeueing forever would spin on a message this worker cannot process at all.
+- **SSRF guard (mandatory).** The target host is resolved before connecting and rejected when it maps to loopback, private (RFC1918), link-local (including `169.254.169.254`), CGNAT, multicast or reserved ranges. The resolved IP is pinned for the connection so DNS cannot be re-pointed between check and connect. `SSRF_ALLOW_PRIVATE` defaults to `false`; the compose demo sets `SSRF_ALLOWLIST_HOSTS=receiver` so only the bundled receiver is reachable inside the Docker network.
+- Only `http` and `https` schemes are accepted; non-standard ports can be blocked via `SSRF_BLOCKED_PORTS`.
+- The endpoint row is read at attempt time, not captured when the event was published. A URL or secret edited between attempts applies to the next retry, which is what makes fixing a wrong URL and waiting for the retry a valid recovery path. The event payload, by contrast, is immutable once ingested.
+- **Acknowledgement:** the message is acked only after the HTTP attempt is finalized and the `DeliveryAttempt` row plus the `Delivery` status update are committed in one transaction. A worker crash before commit causes redelivery, so the system is **at-least-once** and receivers must deduplicate on `X-Webhook-Id`. Consumer `prefetch` is `WORKER_PREFETCH` (default 10).
 
 ## 7. Outbound Signature (HMAC SHA-256)
 
 Headers on every outbound request:
 
-| Header | Value |
-|---|---|
-| `X-Webhook-Id` | delivery id, the idempotency key for the receiver |
-| `X-Webhook-Event` | event type |
-| `X-Webhook-Attempt` | attempt number, 1-based |
-| `X-Webhook-Timestamp` | unix seconds |
+| Header                | Value                                                            |
+| --------------------- | ---------------------------------------------------------------- |
+| `X-Webhook-Id`        | delivery id, the idempotency key for the receiver                |
+| `X-Webhook-Event`     | event type                                                       |
+| `X-Webhook-Attempt`   | attempt number, 1-based                                          |
+| `X-Webhook-Timestamp` | unix seconds                                                     |
 | `X-Webhook-Signature` | `v1=<hex>`; comma-separated when a rotated secret is still valid |
-| `Content-Type` | `application/json` |
-| `User-Agent` | `HookTracker/1.0` |
+| `Content-Type`        | `application/json`                                               |
+| `User-Agent`          | `HookTracker/1.0`                                                |
 
 The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte sequence sent. Receivers must reject a timestamp skew above 300 seconds and compare signatures with a constant-time function.
 
@@ -200,18 +204,18 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 
 ## 8. Idempotency & Deduplication
 
-* Clients may send an `Idempotency-Key` header. When absent, the key defaults to `sha256(eventType + canonicalJson(payload))`.
-* Redis key `idem:{projectId}:{sha256(key)}` stores the original 202 response body for `IDEMPOTENCY_TTL_SECONDS` (default 86400).
-* A repeat within the window returns the original response with `Idempotency-Replayed: true` and creates no new deliveries.
-* A concurrent duplicate (key reserved, response not yet stored) returns `409 Conflict`.
-* A request that ends in an error releases its reservation, so a caller that fixed a validation failure can retry the same key at once instead of waiting out the TTL.
+- Clients may send an `Idempotency-Key` header. When absent, the key defaults to `sha256(eventType + canonicalJson(payload))`.
+- Redis key `idem:{projectId}:{sha256(key)}` stores the original 202 response body for `IDEMPOTENCY_TTL_SECONDS` (default 86400).
+- A repeat within the window returns the original response with `Idempotency-Replayed: true` and creates no new deliveries.
+- A concurrent duplicate (key reserved, response not yet stored) returns `409 Conflict`.
+- A request that ends in an error releases its reservation, so a caller that fixed a validation failure can retry the same key at once instead of waiting out the TTL.
 
 ## 9. Rate Limiting
 
-* **Ingestion:** sliding-window counter in Redis per API key, `RATE_LIMIT_PUBLISH_PER_MINUTE` (default 600). Exceeding it returns `429` with `Retry-After` plus `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. Those three headers are on every publish response, not only on a rejection, so a client can slow down before it is refused. A rejected call is dropped from the window again: leaving it there would let a client that keeps hammering push its own window forward and never recover.
-* `ApiKey.lastUsedAt` is refreshed at most once a minute and never blocks the response. It is a convenience column, not an audit record, and writing it on every request would put a row lock in the hot ingestion path.
-* **Per-endpoint delivery:** token bucket in Redis keyed by endpoint, sized from `Endpoint.rateLimitPerMinute`. When the worker cannot take a token it publishes the message to `webhook.throttle.10s` and acks. This does not increment `attemptCount` and writes no `DeliveryAttempt` row.
-* **Auth routes:** a stricter per-IP limit to slow credential stuffing.
+- **Ingestion:** sliding-window counter in Redis per API key, `RATE_LIMIT_PUBLISH_PER_MINUTE` (default 600). Exceeding it returns `429` with `Retry-After` plus `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. Those three headers are on every publish response, not only on a rejection, so a client can slow down before it is refused. A rejected call is dropped from the window again: leaving it there would let a client that keeps hammering push its own window forward and never recover.
+- `ApiKey.lastUsedAt` is refreshed at most once a minute and never blocks the response. It is a convenience column, not an audit record, and writing it on every request would put a row lock in the hot ingestion path.
+- **Per-endpoint delivery:** token bucket in Redis keyed by endpoint, sized from `Endpoint.rateLimitPerMinute`. When the worker cannot take a token it publishes the message to `webhook.throttle.10s` and acks. This does not increment `attemptCount` and writes no `DeliveryAttempt` row.
+- **Auth routes:** a stricter per-IP limit to slow credential stuffing.
 
 ## 10. Endpoint Health & Circuit Breaking
 
@@ -264,11 +268,11 @@ Every dashboard query is scoped by a `projectId` derived from the membership set
 
 ## 12. Authentication & Multi-Tenancy
 
-* **Dashboard users:** email and password (argon2id). The access token is a 1-hour JWT returned in the response body; the refresh token is a 7-day opaque token in an `HttpOnly; SameSite=Strict` cookie, rotated on each use and revocable server-side.
-* **Ingestion clients:** `Authorization: Bearer ht_<key>`. Lookup by prefix, verification by constant-time hash comparison, rejection when `revokedAt` is set.
-* Authorization is membership-based. `OWNER` manages members, API keys and endpoint secrets; `MEMBER` has read access plus replay. The membership set is read from the database on every request rather than carried inside the access token, so removing someone takes effect at once instead of when their token happens to expire.
-* Refresh tokens are stored as a sha256 hash in `RefreshToken`, never in plaintext. Using one revokes it as the replacement is issued, so a stolen token works at most once — and its use logs the legitimate client out, which is what makes the theft visible.
-* Registering creates the user, a project and an `OWNER` membership in one transaction. Adding a member requires an account that already exists; v1 has no invitation flow and says so with `422` rather than pretending.
+- **Dashboard users:** email and password (argon2id). The access token is a 1-hour JWT returned in the response body; the refresh token is a 7-day opaque token in an `HttpOnly; SameSite=Strict` cookie, rotated on each use and revocable server-side.
+- **Ingestion clients:** `Authorization: Bearer ht_<key>`. Lookup by prefix, verification by constant-time hash comparison, rejection when `revokedAt` is set.
+- Authorization is membership-based. `OWNER` manages members, API keys and endpoint secrets; `MEMBER` has read access plus replay. The membership set is read from the database on every request rather than carried inside the access token, so removing someone takes effect at once instead of when their token happens to expire.
+- Refresh tokens are stored as a sha256 hash in `RefreshToken`, never in plaintext. Using one revokes it as the replacement is issued, so a stolen token works at most once — and its use logs the legitimate client out, which is what makes the theft visible.
+- Registering creates the user, a project and an `OWNER` membership in one transaction. Adding a member requires an account that already exists; v1 has no invitation flow and says so with `422` rather than pretending.
 
 **Cookie flags.** The refresh cookie is `HttpOnly`, `SameSite=Strict`, `Path=/v1/auth`, and `Secure` whenever `NODE_ENV=production`. `Secure` is off in local development because the compose stack serves plain HTTP on localhost and a `Secure` cookie would never be stored there — a first-run failure that reads as a broken login.
 
@@ -276,9 +280,9 @@ Every dashboard query is scoped by a `projectId` derived from the membership set
 
 ## 13. Real-Time Layer (Socket.io)
 
-* Namespace `/realtime`; the JWT is verified during the handshake, not after connect.
-* A socket joins only the `project:{projectId}` rooms its membership covers, which is what prevents cross-tenant leakage.
-* Events and their payloads:
+- Namespace `/realtime`; the JWT is verified during the handshake, not after connect.
+- A socket joins only the `project:{projectId}` rooms its membership covers, which is what prevents cross-tenant leakage.
+- Events and their payloads:
 
 ```text
 delivery.created    { deliveryId, eventId, endpointId, eventType, createdAt }
@@ -289,15 +293,16 @@ delivery.failed     { deliveryId, attempt, reason: RETRYABLE | PERMANENT | EXHAU
 endpoint.disabled   { endpointId, consecutiveFailures, disabledAt }
 ```
 
-  Payloads carry ids, never the webhook body or any secret; the dashboard fetches detail over the API when a row is opened.
-* Workers hold no sockets. They publish to the Redis channel `realtime:{projectId}` as `{ event, payload }`, and API instances fan out through `@socket.io/redis-adapter`, which is also what makes multiple API replicas correct. A realtime publish that fails is logged and dropped: it must never fail a delivery that already committed. Each API instance subscribes to that channel itself and emits to its **local** sockets only — pub/sub already delivered the message to every instance, so emitting through the adapter would send one copy per replica. The adapter stays in place for emits that originate inside one API instance.
-* Emissions are throttled per project (`REALTIME_MAX_EVENTS_PER_SECOND`) so a burst cannot drown the dashboard.
-* A socket outlives the 1-hour access token that opened it. The server records each connection's token expiry and disconnects it with a `token_expired` reason at that moment; the client refreshes and reconnects. Sockets are not left authenticated indefinitely, and revoking a session takes effect within the access token's remaining life rather than never.
+Payloads carry ids, never the webhook body or any secret; the dashboard fetches detail over the API when a row is opened.
+
+- Workers hold no sockets. They publish to the Redis channel `realtime:{projectId}` as `{ event, payload }`, and API instances fan out through `@socket.io/redis-adapter`, which is also what makes multiple API replicas correct. A realtime publish that fails is logged and dropped: it must never fail a delivery that already committed. Each API instance subscribes to that channel itself and emits to its **local** sockets only — pub/sub already delivered the message to every instance, so emitting through the adapter would send one copy per replica. The adapter stays in place for emits that originate inside one API instance.
+- Emissions are throttled per project (`REALTIME_MAX_EVENTS_PER_SECOND`) so a burst cannot drown the dashboard.
+- A socket outlives the 1-hour access token that opened it. The server records each connection's token expiry and disconnects it with a `token_expired` reason at that moment; the client refreshes and reconnects. Sockets are not left authenticated indefinitely, and revoking a session takes effect within the access token's remaining life rather than never.
 
 ## 14. Observability
 
-* `GET /health` for liveness with no dependency checks; `GET /ready` verifies Postgres, Redis and RabbitMQ reachability.
-* `GET /metrics` in Prometheus format:
+- `GET /health` for liveness with no dependency checks; `GET /ready` verifies Postgres, Redis and RabbitMQ reachability.
+- `GET /metrics` in Prometheus format:
 
 ```text
 hooktracker_publish_requests_total{result}
@@ -314,27 +319,29 @@ Labels are deliberately low-cardinality: no project id, endpoint id or URL appea
 
 `/metrics` is served by the API, but deliveries and attempts are produced by the worker, which has no HTTP port and runs at `deploy.replicas`. Nothing is summed across processes: what the worker causes is read back from the source of truth at scrape time.
 
-| Family | Type | Source |
-|---|---|---|
-| `hooktracker_publish_requests_total` | counter | in-process, per API replica; `result` is `accepted`, `rejected` or `error` |
-| `hooktracker_deliveries_total` | gauge | `deliveries` grouped by `status` |
-| `hooktracker_delivery_attempts_total` | counter | `delivery_attempts` grouped by `responseStatus`; `outcome` is `success` or `failure`, `response_class` is `1xx`–`5xx`, `other`, or `none` for an attempt that never got a response |
-| `hooktracker_delivery_duration_seconds` | histogram | `delivery_attempts.durationMs`, one table scan per scrape |
-| `hooktracker_delivery_attempt_number` | histogram | `delivery_attempts.attemptNumber`, bucketed 1..`MAX_ATTEMPTS` |
-| `hooktracker_queue_depth`, `hooktracker_dlq_size` | gauge | `checkQueue` over the queues `shared/queue/topology.js` declares |
-| `hooktracker_endpoints_disabled_total` | gauge | `endpoints` with `status = DISABLED` |
+| Family                                            | Type      | Source                                                                                                                                                                             |
+| ------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hooktracker_publish_requests_total`              | counter   | in-process, per API replica; `result` is `accepted`, `rejected` or `error`                                                                                                         |
+| `hooktracker_deliveries_total`                    | gauge     | `deliveries` grouped by `status`                                                                                                                                                   |
+| `hooktracker_delivery_attempts_total`             | counter   | `delivery_attempts` grouped by `responseStatus`; `outcome` is `success` or `failure`, `response_class` is `1xx`–`5xx`, `other`, or `none` for an attempt that never got a response |
+| `hooktracker_delivery_duration_seconds`           | histogram | `delivery_attempts.durationMs`, one table scan per scrape                                                                                                                          |
+| `hooktracker_delivery_attempt_number`             | histogram | `delivery_attempts.attemptNumber`, bucketed 1..`MAX_ATTEMPTS`                                                                                                                      |
+| `hooktracker_queue_depth`, `hooktracker_dlq_size` | gauge     | `checkQueue` over the queues `shared/queue/topology.js` declares                                                                                                                   |
+| `hooktracker_endpoints_disabled_total`            | gauge     | `endpoints` with `status = DISABLED`                                                                                                                                               |
 
 Two consequences are deliberate. `hooktracker_deliveries_total` is a gauge although its name ends in `_total`: the name is fixed above, and a row moving from `PENDING` to `SUCCEEDED` is not a monotonic count. And every database- or broker-backed family is a global snapshot that each API replica reports identically — aggregate those with `max by (...)`, never `sum`; only `hooktracker_publish_requests_total` is per-replica and summed.
 
 A scrape can never take the API down: each source is collected independently, and one that is unreachable is left out of the response rather than rendered as zero, because an absent series and a series that really is zero do not mean the same thing.
-* Structured JSON logs via `pino`, carrying `requestId` on the API and `deliveryId` with `attempt` on the worker. Secrets, API keys and `Authorization` headers are removed through a pino redaction path list rather than ad-hoc string handling.
-* Graceful shutdown on `SIGTERM`: stop consuming, wait for in-flight attempts up to `SHUTDOWN_GRACE_MS`, close the channel, then the connection pool. The surrounding sequence — one shutdown per process, the force-exit timer, the exit code — is `shared/lifecycle.js`, so a new entrypoint gets it by construction rather than by being copied correctly. The worker drains for a share of the grace period and leaves the rest for the closes, so the two cannot race.
+
+- Structured JSON logs via `pino`, carrying `requestId` on the API and `deliveryId` with `attempt` on the worker. Secrets, API keys and `Authorization` headers are removed through a pino redaction path list rather than ad-hoc string handling.
+- Graceful shutdown on `SIGTERM`: stop consuming, wait for in-flight attempts up to `SHUTDOWN_GRACE_MS`, close the channel, then the connection pool. The surrounding sequence — one shutdown per process, the force-exit timer, the exit code — is `shared/lifecycle.js`, so a new entrypoint gets it by construction rather than by being copied correctly. The worker drains for a share of the grace period and leaves the rest for the closes, so the two cannot race.
 
 ## 15. Retention & Maintenance Jobs
 
 The `jobs` process runs two schedules:
-* **Retention** — deletes `WebhookEvent` rows older than `RETENTION_DAYS` (default 30) in batches, cascading to deliveries and attempts.
-* **Stuck sweeper** — deliveries left `IN_FLIGHT` longer than `STUCK_DELIVERY_MINUTES` are returned to `RETRYING` and re-published, covering a worker killed between HTTP completion and commit.
+
+- **Retention** — deletes `WebhookEvent` rows older than `RETENTION_DAYS` (default 30) in batches, cascading to deliveries and attempts.
+- **Stuck sweeper** — deliveries left `IN_FLIGHT` longer than `STUCK_DELIVERY_MINUTES` are returned to `RETRYING` and re-published, covering a worker killed between HTTP completion and commit.
 
 ## 16. Configuration Reference
 
@@ -345,7 +352,7 @@ The `jobs` process runs two schedules:
 `RATE_LIMIT_PUBLISH_PER_MINUTE`, `IDEMPOTENCY_TTL_SECONDS`, `BULK_REPLAY_LIMIT` (default 500),
 `SSRF_ALLOW_PRIVATE`, `SSRF_ALLOWLIST_HOSTS`, `SSRF_BLOCKED_PORTS`,
 `ENDPOINT_AUTO_DISABLE_THRESHOLD`, `SECRET_ROTATION_GRACE_HOURS`,
-`RETENTION_DAYS`, `STUCK_DELIVERY_MINUTES`, `SHUTDOWN_GRACE_MS`,
+`DLQ_MESSAGE_TTL_HOURS` (default 24), `RETENTION_DAYS`, `STUCK_DELIVERY_MINUTES`, `SHUTDOWN_GRACE_MS`,
 `REALTIME_MAX_EVENTS_PER_SECOND`.
 
 `DEMO_ENDPOINT_SECRET` exists only for the bundled seed and receiver and is absent from a real deployment.

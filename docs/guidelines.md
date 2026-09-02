@@ -1,6 +1,7 @@
 # Development & Coding Guidelines
 
 ## Architectural Rules
+
 - **Module Standard:** Native ESM (`import/export`) is mandatory for all Node.js services. Ensure `"type": "module"` is configured in `package.json`.
 - **Package Boundaries:** `backend/` and `dashboard/` are independent packages with their own `package.json` and `node_modules`. There is no root workspace. Backend ships one image with four entrypoints (`api`, `worker`, `jobs`, `demo-receiver`) sharing `src/shared`.
 - **Separation of Concerns:** Strictly decouple Routes, Controllers, Services, and Data Access (Prisma) layers. Routes never touch Prisma directly; services never read `req`.
@@ -10,6 +11,7 @@
 - **Asynchronous Safety:** Delivery workers must only issue RabbitMQ acknowledgments (`ACK`) after the HTTP attempt is finalized and audit rows are committed to PostgreSQL, in a single transaction.
 
 ## Error Handling & Reliability
+
 - Enforce explicit HTTP request timeouts on all external delivery attempts (`DELIVERY_CONNECT_TIMEOUT_MS` and `DELIVERY_TIMEOUT_MS`).
 - Redact sensitive values (API keys, endpoint secrets, `Authorization` headers, refresh cookies) from logs and error traces through the `pino` redaction path list, never with ad-hoc string replacement.
 - Errors thrown from services are typed (`AppError` subclasses carrying an HTTP status and a problem `type`); a single Express error middleware renders them as `application/problem+json`. Never send a raw stack trace to a client.
@@ -17,6 +19,7 @@
 - Retries are the queue's job, not the code's: no manual `setTimeout` retry loops inside a service.
 
 ## Security Rules
+
 - Every outbound delivery target passes the SSRF guard described in `docs/architecture.md`. There is no code path that issues a request to a user-supplied URL without it.
 - Secrets are compared with `crypto.timingSafeEqual`, never with `===`.
 - Passwords use argon2id. API keys and refresh tokens are stored hashed.
@@ -26,6 +29,7 @@
 - Secrets never travel in a URL, a query string or a log line — only in a request body or an `Authorization` header.
 
 ## Testing
+
 - **Runner:** Vitest. **Integration:** Testcontainers with real Postgres, Redis and RabbitMQ — no broker or database mocks.
 - The integration files share one stack, started once by `tests/support/global-setup.js` (`npm run test:integration`, `vitest.integration.config.js`). Isolation comes from a per-file queue namespace and a per-file project row, not from a container each. `npm run test:docker` runs the standalone environment probe, which deliberately sits outside that setup so a Docker fault is told apart from a code fault.
 - Required integration coverage: the full retry ladder to the DLQ, manual replay, idempotent republish, endpoint rate-limit parking, SSRF rejection, HMAC signature verification against an independent implementation, and worker restart during an in-flight delivery.
@@ -34,6 +38,7 @@
 - There is no CI pipeline. Lint, unit tests, integration tests, `prisma validate` and the Docker build are run locally before a change is considered done, and the observed output is the evidence — a claim that they pass is not.
 
 ## Code Standards
+
 - Use modern JavaScript (ES6+) and native ESM syntax.
 - Handle asynchronous control flow using `async/await`; keep `try/catch` scopes tight and intentional.
 - ESLint + Prettier are authoritative; formatting is not discussed in review. The blank-line rules a reviewer would otherwise argue about are stated in `docs/code-review.md` (CR-1) and enforced by a lint rule.
@@ -41,6 +46,7 @@
 - Follow the commenting rules defined in `CLAUDE.md` without exception.
 
 ## Database
+
 - Schema changes always go through `prisma migrate dev`; the generated SQL is committed.
 - Containers run `prisma migrate deploy` at startup, never `db push`.
 - Every query that a list view issues must be backed by an index declared in `schema.prisma`.

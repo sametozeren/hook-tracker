@@ -48,4 +48,4 @@ Definitions and branches are the landmarks of a file. Packed against their neigh
 
 `npm run lint` in `backend/` and in `dashboard/`. `npx eslint . --fix` inserts the missing lines, and the fix is idempotent — a second run changes nothing.
 
-The rule is implemented in `tools/eslint-rules/padding-around-definitions.js`, shared by both packages. ESLint's stock `padding-line-between-statements` cannot express it: it classifies `export function parse() {}` as an *export* rather than a *function*, and `const parse = () => {}` as a *variable*, so both of the forms this codebase uses most would go unchecked.
+The rule is implemented in `tools/eslint-rules/padding-around-definitions.js`, shared by both packages. ESLint's stock `padding-line-between-statements` cannot express it: it classifies `export function parse() {}` as an _export_ rather than a _function_, and `const parse = () => {}` as a _variable_, so both of the forms this codebase uses most would go unchecked.

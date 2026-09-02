@@ -41,65 +41,58 @@ A manual replay from the dashboard is a **new** delivery with a new id, and is m
 
 ## Rule 4 — Answer with the right status
 
-| Your response | What hook-tracker does |
-|---|---|
-| `2xx` | marks the delivery `SUCCEEDED` |
-| `408`, `425`, `429`, `5xx` | retries on the schedule; `Retry-After` is honored when it exceeds the next delay |
-| `400`, `401`, `403`, `404`, `410`, `422` | stops immediately and marks the delivery `FAILED_PERMANENTLY` |
-| `3xx` | treated as permanent — redirects are not followed |
-| no response before the timeout | retries |
+| Your response                            | What hook-tracker does                                                           |
+| ---------------------------------------- | -------------------------------------------------------------------------------- |
+| `2xx`                                    | marks the delivery `SUCCEEDED`                                                   |
+| `408`, `425`, `429`, `5xx`               | retries on the schedule; `Retry-After` is honored when it exceeds the next delay |
+| `400`, `401`, `403`, `404`, `410`, `422` | stops immediately and marks the delivery `FAILED_PERMANENTLY`                    |
+| `3xx`                                    | treated as permanent — redirects are not followed                                |
+| no response before the timeout           | retries                                                                          |
 
 Return a permanent code only when a retry genuinely cannot help. A `500` for a validation problem burns all six attempts and hides a bug you would otherwise see on the first delivery.
 
 ## Node.js (Express)
 
 ```js
-import express from 'express'
-import crypto from 'node:crypto'
+import express from 'express';
+import crypto from 'node:crypto';
 
-const app = express()
-const SECRET = process.env.WEBHOOK_SECRET
-const TOLERANCE_SECONDS = 300
+const app = express();
+const SECRET = process.env.WEBHOOK_SECRET;
+const TOLERANCE_SECONDS = 300;
 
-app.post(
-  '/webhooks/hook-tracker',
-  express.raw({ type: 'application/json' }),
-  async (req, res) => {
-    const timestamp = req.get('X-Webhook-Timestamp')
-    const header = req.get('X-Webhook-Signature')
-    const deliveryId = req.get('X-Webhook-Id')
+app.post('/webhooks/hook-tracker', express.raw({ type: 'application/json' }), async (req, res) => {
+  const timestamp = req.get('X-Webhook-Timestamp');
+  const header = req.get('X-Webhook-Signature');
+  const deliveryId = req.get('X-Webhook-Id');
 
-    if (!timestamp || !header || !deliveryId) return res.sendStatus(400)
+  if (!timestamp || !header || !deliveryId) return res.sendStatus(400);
 
-    const skew = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp))
-    if (!Number.isFinite(skew) || skew > TOLERANCE_SECONDS) return res.sendStatus(400)
+  const skew = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));
+  if (!Number.isFinite(skew) || skew > TOLERANCE_SECONDS) return res.sendStatus(400);
 
-    const expected = crypto
-      .createHmac('sha256', SECRET)
-      .update(`${timestamp}.`)
-      .update(req.body)
-      .digest()
+  const expected = crypto
+    .createHmac('sha256', SECRET)
+    .update(`${timestamp}.`)
+    .update(req.body)
+    .digest();
 
-    const matches = header
-      .split(',')
-      .map((part) => part.trim().replace(/^v1=/, ''))
-      .some((candidate) => {
-        const received = Buffer.from(candidate, 'hex')
-        return (
-          received.length === expected.length &&
-          crypto.timingSafeEqual(received, expected)
-        )
-      })
+  const matches = header
+    .split(',')
+    .map((part) => part.trim().replace(/^v1=/, ''))
+    .some((candidate) => {
+      const received = Buffer.from(candidate, 'hex');
+      return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+    });
 
-    if (!matches) return res.sendStatus(401)
+  if (!matches) return res.sendStatus(401);
 
-    const event = JSON.parse(req.body.toString('utf8'))
-    const isNew = await storeIfAbsent(deliveryId, event)
-    if (isNew) await enqueueForProcessing(deliveryId)
+  const event = JSON.parse(req.body.toString('utf8'));
+  const isNew = await storeIfAbsent(deliveryId, event);
+  if (isNew) await enqueueForProcessing(deliveryId);
 
-    res.sendStatus(200)
-  },
-)
+  res.sendStatus(200);
+});
 ```
 
 ## Python (Flask)

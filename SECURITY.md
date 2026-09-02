@@ -96,7 +96,7 @@ endpoint URLs are removed through the redaction path list in
 **Project isolation.** Every dashboard query derives `projectId` from the authenticated
 membership set, never from an unchecked route parameter. A project the caller does not
 belong to answers identically to a project that does not exist (`404`), so ids cannot
-be enumerated by comparing responses. A caller who *is* a member but lacks the required
+be enumerated by comparing responses. A caller who _is_ a member but lacks the required
 role gets `403`, because they already know the project exists.
 
 **Error responses.** Errors are rendered as RFC 9457 `application/problem+json` by a

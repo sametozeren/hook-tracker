@@ -11,6 +11,18 @@ change is listed here with the steps an existing deployment has to take.
 
 ## [Unreleased]
 
+### Added
+
+- Dead-letter messages now expire. `publishDeadLetter` stamps every message with
+  `DLQ_MESSAGE_TTL_HOURS` (default 24), so `webhook.dlq` no longer grows without a bound. Replay is
+  unaffected: it reads the `Delivery` row in Postgres, which the queue only ever duplicated.
+
+### Upgrading
+
+- Messages already sitting in `webhook.dlq` were published without an expiry and will stay there.
+  Purge them once, by hand, after deploying this version. No topology change is required — the
+  expiry travels on the message, not on the queue.
+
 ## [0.1.0] - 2026-09-02
 
 First release. A webhook gateway and retry engine that takes one event from your

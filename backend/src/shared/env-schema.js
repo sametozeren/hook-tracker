@@ -53,6 +53,7 @@ export const envSchema = z.object({
   ENDPOINT_AUTO_DISABLE_THRESHOLD: z.coerce.number().int().min(1).default(20),
   SECRET_ROTATION_GRACE_HOURS: z.coerce.number().int().min(1).default(24),
 
+  DLQ_MESSAGE_TTL_HOURS: z.coerce.number().int().min(1).default(24),
   RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
   STUCK_DELIVERY_MINUTES: z.coerce.number().int().min(1).default(15),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),

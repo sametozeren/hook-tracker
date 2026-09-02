@@ -29,7 +29,11 @@ await assertTopology(queue.channel, topology);
 
 const handleDelivery = createDeliveryHandler({
   prisma,
-  publisher: createPublisher({ channel: queue.channel, topology }),
+  publisher: createPublisher({
+    channel: queue.channel,
+    topology,
+    deadLetterTtlMs: config.DLQ_MESSAGE_TTL_HOURS * 60 * 60 * 1000,
+  }),
   realtime: createRealtimePublisher({ redis, logger }),
   tokenBucket: createTokenBucket({ redis }),
   config,
