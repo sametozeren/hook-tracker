@@ -87,6 +87,17 @@ cd dashboard && npm run lint && npm run format
 
 `npm run format:write` fixes formatting in place. Both must be clean in both packages.
 
+The Markdown outside the two packages — this file, the README, `CHANGELOG.md` and everything
+under `docs/` — shares the same `.prettierrc.json` but belongs to no package, so it is checked
+with the binary one of them already installed:
+
+```bash
+./backend/node_modules/.bin/prettier --check "*.md" "docs/**/*.md"
+```
+
+Add `--write` to fix it. A specification that drifts out of format produces diffs about
+whitespace instead of about behaviour, which is the thing the formatter exists to prevent.
+
 Beyond what the linter enforces:
 
 - **CR-1 (blank lines around definitions and blocks)** in `docs/code-review.md` is a
