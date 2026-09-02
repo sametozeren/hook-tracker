@@ -149,6 +149,7 @@ export function createAuthService({ prisma, config, now = () => new Date() }) {
             id: membership.project.id,
             name: membership.project.name,
             slug: membership.project.slug,
+            alertWebhookUrl: membership.project.alertWebhookUrl,
           },
         })),
       };

@@ -69,7 +69,7 @@ export function createApp({ prisma, redis, publisher, connection, topology, conf
 
   const publishService = createPublishService({ prisma, publisher, logger });
   const authService = createAuthService({ prisma, config });
-  const projectService = createProjectService({ prisma });
+  const projectService = createProjectService({ prisma, config });
   const apiKeyService = createApiKeyService({ prisma });
   const endpointService = createEndpointService({ prisma, config, publishService });
   const deliveryService = createDeliveryService({ prisma, publisher, config, logger });

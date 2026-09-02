@@ -5,6 +5,7 @@ import { RETRY_SCHEDULE } from '../../src/shared/retry.js';
 import { assertTopology, createTopology } from '../../src/shared/queue/topology.js';
 import { createRealtimePublisher } from '../../src/shared/realtime.js';
 import { createTokenBucket } from '../../src/shared/token-bucket.js';
+import { createAlertDispatcher } from '../../src/shared/alerts.js';
 import { createDeliveryHandler } from '../../src/worker/handle-delivery.js';
 import { recordInto } from '../support/consume.js';
 import {
@@ -54,6 +55,7 @@ let consumerTag;
 
 const deadLettered = [];
 const realtimeEvents = [];
+const alertsSent = [];
 
 async function startConsumer() {
   const { consumerTag: tag } = await queue.channel.consume(
@@ -159,6 +161,16 @@ beforeAll(async () => {
     publisher,
     realtime: createRealtimePublisher({ redis: clients.redis }),
     tokenBucket: createTokenBucket({ redis: clients.redis }),
+    alerts: createAlertDispatcher({
+      prisma,
+      redis: clients.redis,
+      config: handlerConfig,
+      send: async (options) => {
+        alertsSent.push(JSON.parse(options.body));
+
+        return { responseStatus: 204 };
+      },
+    }),
     config: handlerConfig,
     schedule,
   });
@@ -375,6 +387,43 @@ describe('endpoint health', () => {
       ).toBe(true);
     } finally {
       handlerConfig.ENDPOINT_AUTO_DISABLE_THRESHOLD = 20;
+    }
+  });
+
+  it('alerts the project that configured an address when an endpoint is disabled', async () => {
+    handlerConfig.ENDPOINT_AUTO_DISABLE_THRESHOLD = 1;
+
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { alertWebhookUrl: `${RECEIVER_URL}/ok` },
+    });
+
+    try {
+      const endpoint = await createEndpoint({ url: `${RECEIVER_URL}/unknown-route` });
+      const created = await createDelivery(endpoint);
+
+      await publisher.publishDelivery({ deliveryId: created.id, attempt: 1 });
+
+      await waitForStatus(created.id, 'FAILED_PERMANENTLY');
+      await waitFor(() => alertsSent.some((alert) => alert.detail.endpointId === endpoint.id));
+
+      const alert = alertsSent.find((entry) => entry.detail.endpointId === endpoint.id);
+
+      expect(alert.reason).toBe('endpoint_disabled');
+      expect(alert.projectId).toBe(project.id);
+      expect(alert.detail).toEqual({
+        endpointId: endpoint.id,
+        consecutiveFailures: 1,
+        threshold: 1,
+      });
+      expect(JSON.stringify(alert)).not.toContain(RECEIVER_SECRET);
+    } finally {
+      handlerConfig.ENDPOINT_AUTO_DISABLE_THRESHOLD = 20;
+
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { alertWebhookUrl: null },
+      });
     }
   });
 });

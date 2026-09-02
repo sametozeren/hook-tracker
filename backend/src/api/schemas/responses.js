@@ -64,7 +64,12 @@ export const meResponse = z
     memberships: z.array(
       z.object({
         role,
-        project: z.object({ id: z.string(), name: z.string(), slug: z.string() }),
+        project: z.object({
+          id: z.string(),
+          name: z.string(),
+          slug: z.string(),
+          alertWebhookUrl: z.string().nullable(),
+        }),
       }),
     ),
   })
@@ -75,6 +80,7 @@ export const projectResponse = z
     id: z.string(),
     name: z.string(),
     slug: z.string(),
+    alertWebhookUrl: z.string().nullable(),
     createdAt: timestamp,
     role: role.optional(),
   })

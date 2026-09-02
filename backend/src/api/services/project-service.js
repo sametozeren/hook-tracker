@@ -1,13 +1,35 @@
 import { ConflictError, NotFoundError, UnprocessableError } from '../../shared/errors.js';
 import { newId } from '../../shared/ids.js';
 import { ROLES } from '../../shared/roles.js';
+import { resolveSafeTarget } from '../../shared/ssrf.js';
 import { slugify } from './auth-service.js';
 
 function projectView(project) {
-  return { id: project.id, name: project.name, slug: project.slug, createdAt: project.createdAt };
+  return {
+    id: project.id,
+    name: project.name,
+    slug: project.slug,
+    alertWebhookUrl: project.alertWebhookUrl,
+    createdAt: project.createdAt,
+  };
 }
 
-export function createProjectService({ prisma }) {
+export function createProjectService({ prisma, config, resolveTarget = resolveSafeTarget }) {
+  // The alert URL is typed by an owner, so it is guarded exactly as an endpoint
+  // URL is: a target the delivery pipeline would refuse is not a target the
+  // alert channel may reach either.
+  async function assertAlertTarget(url) {
+    try {
+      await resolveTarget(url, {
+        allowPrivate: config.SSRF_ALLOW_PRIVATE,
+        allowlistHosts: config.SSRF_ALLOWLIST_HOSTS,
+        blockedPorts: config.SSRF_BLOCKED_PORTS,
+      });
+    } catch (error) {
+      throw new UnprocessableError(`The URL is not an allowed alert target: ${error.message}`);
+    }
+  }
+
   return {
     async list({ memberships }) {
       const projects = await prisma.project.findMany({
@@ -38,8 +60,17 @@ export function createProjectService({ prisma }) {
       return { ...projectView(project), role: ROLES.OWNER };
     },
 
-    async rename({ projectId, name }) {
-      const project = await prisma.project.update({ where: { id: projectId }, data: { name } });
+    async update({ projectId, name, alertWebhookUrl }) {
+      if (typeof alertWebhookUrl === 'string') {
+        await assertAlertTarget(alertWebhookUrl);
+      }
+
+      const data = {
+        ...(name === undefined ? {} : { name }),
+        ...(alertWebhookUrl === undefined ? {} : { alertWebhookUrl }),
+      };
+
+      const project = await prisma.project.update({ where: { id: projectId }, data });
 
       return projectView(project);
     },

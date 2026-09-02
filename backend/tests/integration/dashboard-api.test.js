@@ -198,6 +198,36 @@ describe('authentication', () => {
   });
 });
 
+describe('project settings', () => {
+  it('stores an alert address and clears it again', async () => {
+    const saved = await call('PATCH', `/v1/projects/${alice.project.id}`, {
+      token: alice.token,
+      body: { alertWebhookUrl: 'http://localhost:4000/ok' },
+    });
+
+    expect(saved.status).toBe(200);
+    expect(saved.body.alertWebhookUrl).toBe('http://localhost:4000/ok');
+    expect(saved.body.name).toBe(alice.project.name);
+
+    const cleared = await call('PATCH', `/v1/projects/${alice.project.id}`, {
+      token: alice.token,
+      body: { alertWebhookUrl: null },
+    });
+
+    expect(cleared.body.alertWebhookUrl).toBeNull();
+  });
+
+  it('refuses an alert address the delivery pipeline would refuse', async () => {
+    const response = await call('PATCH', `/v1/projects/${alice.project.id}`, {
+      token: alice.token,
+      body: { alertWebhookUrl: 'http://127.0.0.1:9/hook' },
+    });
+
+    expect(response.status).toBe(422);
+    expect(response.body.detail).toContain('not an allowed alert target');
+  });
+});
+
 describe('endpoints', () => {
   it('creates an endpoint and returns its signing secret exactly once', async () => {
     const response = await call('POST', `/v1/projects/${alice.project.id}/endpoints`, {

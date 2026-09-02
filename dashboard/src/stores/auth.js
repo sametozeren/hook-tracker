@@ -34,6 +34,20 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  function mergeProject(project) {
+    const detail = {
+      name: project.name,
+      slug: project.slug,
+      alertWebhookUrl: project.alertWebhookUrl ?? null,
+    };
+
+    memberships.value = memberships.value.map((membership) =>
+      membership.project.id === project.id
+        ? { ...membership, project: { ...membership.project, ...detail } }
+        : membership,
+    );
+  }
+
   async function loadMe() {
     const me = await api.get('/auth/me');
 
@@ -154,6 +168,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     projects,
     roleIn,
+    mergeProject,
     loadMe,
     refresh,
     login,

@@ -221,6 +221,12 @@ The signed string is `<timestamp>.<rawBody>`, where `rawBody` is the exact byte 
 
 `Endpoint.consecutiveFailures` increments on each permanent failure and resets on any success. The counter is written from the value read at the start of the attempt, so two workers failing against the same endpoint at the same moment can cost one increment rather than two — the threshold is a health signal, not an exact count. At `ENDPOINT_AUTO_DISABLE_THRESHOLD` (default 20) the endpoint moves to `DISABLED`, an `endpoint.disabled` event is emitted, and new publishes skip it — recorded as a `SKIPPED` delivery so the audit trail stays complete. Re-enabling is a manual dashboard action.
 
+**Alerting.** A disabled endpoint delivers nothing, so the project is told rather than left to notice. A project that set `Project.alertWebhookUrl` receives a `POST` for three conditions: an endpoint was auto-disabled, the dead-letter queue crossed `ALERT_DLQ_THRESHOLD`, and a dependency became unreachable. The two instance-wide conditions go to every project that configured an address, because a stalled broker stalls all of them.
+
+The alert is a side channel and behaves like one: it carries `{ source, reason, projectId, occurredAt, detail }` and never a payload, a secret or an API key; it is unsigned, because the address is typed by an owner rather than negotiated with an integrator; it is sent once per `ALERT_SUPPRESSION_MINUTES` for the same project, reason and scope, claimed in Redis with `NX` so two workers noticing the same endpoint send one alert between them; it is not retried; and every failure is logged and swallowed, since a channel that cannot be reached must not take down the delivery that noticed the problem. The address is guarded by `resolveSafeTarget` when it is saved and again when it is used.
+
+Postgres is the one dependency that cannot be alerted on: the addresses live there, so an outage takes the routing table with it. It is logged, and `GET /ready` remains the check that answers for it.
+
 ## 11. Data Model (Prisma / PostgreSQL)
 
 ```text
@@ -338,10 +344,11 @@ A scrape can never take the API down: each source is collected independently, an
 
 ## 15. Retention & Maintenance Jobs
 
-The `jobs` process runs two schedules:
+The `jobs` process runs three schedules:
 
 - **Retention** — deletes `WebhookEvent` rows older than `RETENTION_DAYS` (default 30) in batches, cascading to deliveries and attempts.
 - **Stuck sweeper** — deliveries left `IN_FLIGHT` longer than `STUCK_DELIVERY_MINUTES` are returned to `RETRYING` and re-published, covering a worker killed between HTTP completion and commit.
+- **Alert watch** — every five minutes, pings Redis and RabbitMQ and reads the dead-letter queue depth, raising the alerts of §10. The interval is deliberately long: both conditions outlive a single pass, and a short one would turn one outage into an alert every few seconds for every project.
 
 ## 16. Configuration Reference
 
@@ -353,6 +360,7 @@ The `jobs` process runs two schedules:
 `SSRF_ALLOW_PRIVATE`, `SSRF_ALLOWLIST_HOSTS`, `SSRF_BLOCKED_PORTS`,
 `ENDPOINT_AUTO_DISABLE_THRESHOLD`, `SECRET_ROTATION_GRACE_HOURS`,
 `DLQ_MESSAGE_TTL_HOURS` (default 24), `RETENTION_DAYS`, `STUCK_DELIVERY_MINUTES`, `SHUTDOWN_GRACE_MS`,
+`ALERT_TIMEOUT_MS` (default 5000), `ALERT_SUPPRESSION_MINUTES` (default 60), `ALERT_DLQ_THRESHOLD` (default 100),
 `REALTIME_MAX_EVENTS_PER_SECOND`.
 
 `DEMO_ENDPOINT_SECRET` exists only for the bundled seed and receiver and is absent from a real deployment.

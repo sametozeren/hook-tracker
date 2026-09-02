@@ -75,10 +75,20 @@ Auth routes are rate limited per IP (20 attempts per minute), separately from th
 | ------ | ----------------------------------------- | ------------------------------ |
 | GET    | `/v1/projects`                            | projects the user belongs to   |
 | POST   | `/v1/projects`                            | create, caller becomes `OWNER` |
-| PATCH  | `/v1/projects/:projectId`                 | rename                         |
+| PATCH  | `/v1/projects/:projectId`                 | rename, set the alert address  |
 | GET    | `/v1/projects/:projectId/members`         | list                           |
 | POST   | `/v1/projects/:projectId/members`         | add by email, `OWNER` only     |
 | DELETE | `/v1/projects/:projectId/members/:userId` | remove, `OWNER` only           |
+
+`PATCH /v1/projects/:projectId` is a partial update, `OWNER` only. It accepts `name`, `alertWebhookUrl` or both, and at least one of them:
+
+```json
+{ "alertWebhookUrl": "https://alerts.example.com/hook-tracker" }
+```
+
+`null` clears the address and turns alerting off for the project. The URL runs through the same SSRF guard endpoint URLs do, so a blocked target is refused with `422` and `The URL is not an allowed alert target: ...` rather than accepted and dropped at send time. Every project object — here, in `GET /v1/projects` and in `GET /v1/auth/me` — carries `alertWebhookUrl`.
+
+Alerts are described in `docs/architecture.md` §10: unsigned, never retried, at most one per `ALERT_SUPPRESSION_MINUTES` for the same reason and scope.
 
 ## API Keys
 

@@ -1,3 +1,4 @@
+import { createAlertDispatcher } from '../shared/alerts.js';
 import { config } from '../shared/config.js';
 import { disconnectDatabase, prisma } from '../shared/db.js';
 import { onShutdown } from '../shared/lifecycle.js';
@@ -36,6 +37,7 @@ const handleDelivery = createDeliveryHandler({
   }),
   realtime: createRealtimePublisher({ redis, logger }),
   tokenBucket: createTokenBucket({ redis }),
+  alerts: createAlertDispatcher({ prisma, redis, config, logger }),
   config,
   logger,
 });

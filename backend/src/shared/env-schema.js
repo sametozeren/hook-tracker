@@ -54,6 +54,9 @@ export const envSchema = z.object({
   SECRET_ROTATION_GRACE_HOURS: z.coerce.number().int().min(1).default(24),
 
   DLQ_MESSAGE_TTL_HOURS: z.coerce.number().int().min(1).default(24),
+  ALERT_TIMEOUT_MS: z.coerce.number().int().min(100).default(5_000),
+  ALERT_SUPPRESSION_MINUTES: z.coerce.number().int().min(1).default(60),
+  ALERT_DLQ_THRESHOLD: z.coerce.number().int().min(1).default(100),
   RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
   STUCK_DELIVERY_MINUTES: z.coerce.number().int().min(1).default(15),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(15_000),

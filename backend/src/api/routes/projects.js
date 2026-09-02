@@ -9,6 +9,7 @@ import {
   endpointCreateSchema,
   memberSchema,
   projectSchema,
+  projectUpdateSchema,
 } from '../schemas/dashboard.js';
 
 export function createProjectRouter({
@@ -35,12 +36,13 @@ export function createProjectRouter({
   router.patch(
     '/projects/:projectId',
     requireProjectRole(ROLES.OWNER),
-    validateBody(projectSchema),
+    validateBody(projectUpdateSchema),
     async (req, res) => {
       res.status(200).json(
-        await projectService.rename({
+        await projectService.update({
           projectId: req.params.projectId,
           name: req.validated.name,
+          alertWebhookUrl: req.validated.alertWebhookUrl,
         }),
       );
     },

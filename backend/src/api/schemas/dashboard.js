@@ -31,6 +31,14 @@ export const loginSchema = z.object({ email, password: z.string().min(1).max(200
 
 export const projectSchema = z.object({ name }).strict();
 
+// Spelled out rather than derived with .partial(): a partial keeps the defaults
+// of the fields it makes optional, and an update that omits a field must leave
+// it alone rather than reset it.
+export const projectUpdateSchema = z
+  .object({ name: name.optional(), alertWebhookUrl: z.url().max(2048).nullable().optional() })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, { message: 'requires at least one field' });
+
 export const memberSchema = z
   .object({ email, role: z.enum(ROLE_VALUES).default(ROLES.MEMBER) })
   .strict();

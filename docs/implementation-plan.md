@@ -160,14 +160,14 @@ Nothing consumes `webhook.dlq`. The message it holds carries `deliveryId` and `a
 
 An endpoint that fails `ENDPOINT_AUTO_DISABLE_THRESHOLD` times in a row is disabled and nothing is delivered to it after that. Today the only way to learn this is to open the dashboard. The alert is operational — it is addressed to whoever runs the instance, not to the endpoint's owner — so it is configured per project, not per endpoint.
 
-- [ ] `Project.alertWebhookUrl`, optional, and its migration
-- [ ] The URL is validated through `resolveSafeTarget` when it is saved, and a blocked target is rejected with `422` on the settings form, exactly as an endpoint URL is
-- [ ] `src/shared/alerts.js` — one place that builds the body and sends it: short timeout, no retry, failures logged and never propagated into the delivery path
-- [ ] Three triggers: an endpoint was auto-disabled (worker), the dead-letter queue crossed its threshold (jobs), a dependency became unreachable (jobs)
-- [ ] `ALERT_SUPPRESSION_MINUTES` (default 60) — a Redis window per alert source, so one broken endpoint cannot produce an alert a minute
-- [ ] The body carries project, endpoint id, reason and time. It carries no payload, no secret and no API key
-- [ ] Owner-only field on the settings screen; `docs/api.md`, `docs/dashboard.md` and `docs/architecture.md` §10 updated
-- [ ] Requests are unsigned in this version. A receiver that needs provenance is the reason to revisit it, and that reason has not appeared yet
+- [x] `Project.alertWebhookUrl`, optional, and its migration
+- [x] The URL is validated through `resolveSafeTarget` when it is saved, and a blocked target is rejected with `422` on the settings form, exactly as an endpoint URL is
+- [x] `src/shared/alerts.js` — one place that builds the body and sends it: short timeout, no retry, failures logged and never propagated into the delivery path
+- [x] Three triggers: an endpoint was auto-disabled (worker), the dead-letter queue crossed its threshold (jobs), a dependency became unreachable (jobs)
+- [x] `ALERT_SUPPRESSION_MINUTES` (default 60) — a Redis window per alert source, so one broken endpoint cannot produce an alert a minute
+- [x] The body carries project, endpoint id, reason and time. It carries no payload, no secret and no API key
+- [x] Owner-only field on the settings screen; `docs/api.md`, `docs/dashboard.md` and `docs/architecture.md` §10 updated
+- [x] Requests are unsigned in this version. A receiver that needs provenance is the reason to revisit it, and that reason has not appeared yet
 
 **Acceptance:** an integration test drives an endpoint to its auto-disable threshold and sees the alert arrive at a stub receiver; a second disable inside the suppression window sends nothing; an alert URL pointing at a private address is refused with `422` when saved; a receiver that times out leaves the delivery pipeline untouched and the failure appears only in the log.
 

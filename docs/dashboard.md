@@ -49,7 +49,9 @@ Ingested events with their fan-out: one event, the deliveries it produced, and e
 
 ### Settings
 
-Project name, members and roles, API keys (create, list by prefix and last-used, revoke). Owner-only actions are hidden rather than disabled for members, except where hiding would make the interface confusing.
+Project name, the alert address, members and roles, API keys (create, list by prefix and last-used, revoke). Owner-only actions are hidden rather than disabled for members, except where hiding would make the interface confusing.
+
+The alert address states what it is for before it asks for a value — an endpoint disabled by repeated failures, a dead-letter backlog, an unreachable dependency — and that the request is neither signed nor retried, so nobody builds a delivery guarantee on it. Clearing the field turns alerts off. A URL the delivery pipeline would refuse is refused here too, and the reason appears next to the field rather than as a banner, because the field is what has to change.
 
 ## Empty, loading and error states
 

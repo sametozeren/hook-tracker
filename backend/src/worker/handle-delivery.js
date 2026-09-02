@@ -1,3 +1,4 @@
+import { ALERT_REASON } from '../shared/alerts.js';
 import { sendWebhook } from '../shared/http-client.js';
 import { newId } from '../shared/ids.js';
 import {
@@ -64,11 +65,14 @@ function describe(result) {
   return `HTTP ${result.responseStatus}`;
 }
 
+const NO_ALERTS = { notify: async () => ({ sent: false, skipped: 'not_configured' }) };
+
 export function createDeliveryHandler({
   prisma,
   publisher,
   realtime,
   tokenBucket,
+  alerts = NO_ALERTS,
   config,
   logger,
   schedule = RETRY_SCHEDULE,
@@ -202,6 +206,17 @@ export function createDeliveryHandler({
           endpointId: endpoint.id,
           consecutiveFailures: failures,
           disabledAt: completedAt,
+        },
+      });
+
+      await alerts.notify({
+        projectId: delivery.event.projectId,
+        reason: ALERT_REASON.ENDPOINT_DISABLED,
+        scope: endpoint.id,
+        detail: {
+          endpointId: endpoint.id,
+          consecutiveFailures: failures,
+          threshold: config.ENDPOINT_AUTO_DISABLE_THRESHOLD,
         },
       });
     }

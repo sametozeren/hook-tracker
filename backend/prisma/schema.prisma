@@ -42,10 +42,11 @@ model User {
 }
 
 model Project {
-  id        String   @id
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  id              String   @id
+  name            String
+  slug            String   @unique
+  alertWebhookUrl String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
 
   memberships Membership[]
   apiKeys     ApiKey[]
