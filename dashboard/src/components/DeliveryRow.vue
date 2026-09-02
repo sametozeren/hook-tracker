@@ -15,7 +15,10 @@ import StatusPill from './ui/StatusPill.vue';
 const RESET = 'md:col-start-auto md:col-end-auto md:row-start-auto';
 
 // lastError is a human message, not a short code, and the cell it lands in is
-// 62px wide; the untruncated string would set the height of the whole row.
+// 62px wide; the untruncated string would set the height of the whole row. The
+// cell is width-constrained rather than end-aligned, because a grid item with
+// justify-self is sized to its content and overflows the track to the left,
+// over the attempt ladder, instead of being clipped by truncate.
 const ERROR_CODE_MAX = 18;
 
 const props = defineProps({
@@ -99,7 +102,7 @@ const target = computed(() => ({
     </span>
 
     <span
-      class="col-start-1 col-end-2 row-start-5 min-w-0 truncate md:justify-self-end"
+      class="col-start-1 col-end-2 row-start-5 min-w-0 truncate md:w-full md:text-right"
       :class="RESET"
       :title="delivery.lastError || undefined"
     >

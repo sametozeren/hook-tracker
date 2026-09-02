@@ -10,7 +10,9 @@ stack — Postgres, Redis, RabbitMQ, the API, the delivery workers, the maintena
 jobs, the dashboard, and a demo receiver you can point at to watch the retry ladder
 work.
 
-![The deliveries screen: status pills, attempt ladders, and per-row response codes](docs/images/dashboard.png)
+| Dark | Light |
+|---|---|
+| ![The deliveries screen in dark mode: status pills, attempt ladders and per-row response codes](docs/images/deliveries-dark.png) | ![The same deliveries screen in light mode](docs/images/deliveries-light.png) |
 
 ## Why it exists
 
@@ -83,7 +85,38 @@ A delivery is one event aimed at one endpoint. One event fanned out to three
 endpoints produces three deliveries, each with its own status and its own ladder
 position. Attempts belong to a delivery: at most six, and every one of them is a row.
 
-![Delivery detail: attempt timeline, next-retry countdown, request headers and payload](docs/images/delivery-detail.png)
+| Dark | Light |
+|---|---|
+| ![Delivery detail in dark mode: attempt timeline, response codes and per-attempt bodies](docs/images/delivery-detail-dark.png) | ![The same delivery detail panel in light mode](docs/images/delivery-detail-light.png) |
+
+## The dashboard
+
+Every screen reads the same API a script would call. The theme follows the system
+preference until the header toggle overrides it, cycling system, light and dark — every
+screen below is shown in both.
+
+Endpoints are the HTTP targets of a project, each with its own signing secret, rate
+limit and consecutive-failure count. A disabled endpoint says why it is disabled and
+offers the one action that resumes delivery.
+
+| Dark | Light |
+|---|---|
+| ![The endpoints screen in dark mode: active and disabled endpoints with their event subscriptions, rate limits and failure counts](docs/images/endpoints-dark.png) | ![The same endpoints screen in light mode](docs/images/endpoints-light.png) |
+
+The events screen groups deliveries by the event that produced them, so a fan-out that
+ended differently on different endpoints is one row to read rather than three.
+
+| Dark | Light |
+|---|---|
+| ![The events screen in dark mode: events grouped with their deliveries, flagging the ones whose endpoints disagreed](docs/images/events-dark.png) | ![The same events screen in light mode](docs/images/events-light.png) |
+
+Settings holds the project name, its members and their roles, and the API keys — listed
+by prefix and last use, because a key's full value is shown exactly once, when it is
+created.
+
+| Dark | Light |
+|---|---|
+| ![Project settings in dark mode: project name, members with roles, and API keys listed by prefix and last use](docs/images/settings-dark.png) | ![The same project settings screen in light mode](docs/images/settings-light.png) |
 
 ## Operating it
 

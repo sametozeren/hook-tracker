@@ -59,6 +59,17 @@ const themeLabel = computed(() => {
 
 const themeAction = computed(() => `Change theme, currently ${themeMode.value}`);
 
+const themeIcon = computed(() => {
+  const map = {
+    system: 'M2.6 3.2h10.8v7.6H2.6zM6.2 13.4h3.6M8 10.8v2.6',
+    light:
+      'M11.2 8a3.2 3.2 0 11-6.4 0 3.2 3.2 0 016.4 0M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.1 3.1l1.1 1.1M11.8 11.8l1.1 1.1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1',
+    dark: 'M8 2a4 4 0 006 6 6 6 0 11-6-6z',
+  };
+
+  return map[themeMode.value];
+});
+
 const accountName = computed(() => auth.user?.name ?? auth.user?.email ?? 'your account');
 
 const accountAction = computed(() => `Account menu for ${accountName.value}`);
@@ -288,12 +299,13 @@ onBeforeUnmount(() => {
             @click="cycleThemeMode()"
           >
             <svg class="size-4" viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="8" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.3" />
               <path
-                d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.1 3.1l1.1 1.1M11.8 11.8l1.1 1.1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1"
+                :d="themeIcon"
+                fill="none"
                 stroke="currentColor"
                 stroke-width="1.3"
                 stroke-linecap="round"
+                stroke-linejoin="round"
               />
             </svg>
           </button>
