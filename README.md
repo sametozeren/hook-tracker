@@ -103,20 +103,23 @@ offers the one action that resumes delivery.
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
 | ![The endpoints screen in dark mode: active and disabled endpoints with their event subscriptions, rate limits and failure counts](docs/images/endpoints-dark.png) | ![The same endpoints screen in light mode](docs/images/endpoints-light.png) |
 
-The events screen groups deliveries by the event that produced them, so a fan-out that
-ended differently on different endpoints is one row to read rather than three.
+The events screen lists what the project received, with the deliveries each event produced,
+so a fan-out that ended differently on different endpoints is one row to read rather than
+three. Search takes a field and a value — `customer.id` and `cus_1001` — and finds the events
+whose payload holds exactly that, which is the question an operator arrives with: this order
+was never delivered, where did it go.
 
-| Dark                                                                                                                                              | Light                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| ![The events screen in dark mode: events grouped with their deliveries, flagging the ones whose endpoints disagreed](docs/images/events-dark.png) | ![The same events screen in light mode](docs/images/events-light.png) |
+| Dark                                                                                                                                                              | Light                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| ![The events screen in dark mode: events with their delivery counts and payload search, flagging the ones whose endpoints disagreed](docs/images/events-dark.png) | ![The same events screen in light mode](docs/images/events-light.png) |
 
-Settings holds the project name, its members and their roles, and the API keys — listed
-by prefix and last use, because a key's full value is shown exactly once, when it is
-created.
+Settings holds the project name, the address alerts are sent to, the members and their
+roles, and the API keys — listed by prefix and last use, because a key's full value is shown
+exactly once, when it is created.
 
-| Dark                                                                                                                                          | Light                                                                             |
-| --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| ![Project settings in dark mode: project name, members with roles, and API keys listed by prefix and last use](docs/images/settings-dark.png) | ![The same project settings screen in light mode](docs/images/settings-light.png) |
+| Dark                                                                                                                                                         | Light                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| ![Project settings in dark mode: project name, alert address, members with roles, and API keys listed by prefix and last use](docs/images/settings-dark.png) | ![The same project settings screen in light mode](docs/images/settings-light.png) |
 
 ## Operating it
 
