@@ -47,6 +47,8 @@ Send test event delivers a synthetic `ping` and links to the resulting delivery.
 
 Ingested events with their fan-out: one event, the deliveries it produced, and each delivery's status. Useful when one endpoint succeeded and another did not for the same event.
 
+The screen reads the event endpoint, so it lists what the project received rather than what the delivery list happened to load. Search takes a path and a value — `customer.id` and `cus_9` — and finds events whose payload contains exactly that, which is the question an operator arrives with: this order was not delivered, where did it go. The screen says the match is exact rather than letting someone infer substring search from an empty result.
+
 ### Settings
 
 Project name, the alert address, members and roles, API keys (create, list by prefix and last-used, revoke). Owner-only actions are hidden rather than disabled for members, except where hiding would make the interface confusing.

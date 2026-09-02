@@ -539,6 +539,120 @@ describe('deliveries', () => {
   });
 });
 
+async function publish(apiKey, payload) {
+  const response = await fetch(`${baseUrl}/v1/publish`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ eventType: 'order.searched', payload }),
+  });
+
+  return response.status;
+}
+
+describe('events', () => {
+  let searchable;
+
+  beforeAll(async () => {
+    const key = await call('POST', `/v1/projects/${alice.project.id}/api-keys`, {
+      token: alice.token,
+      body: { name: 'events-suite' },
+    });
+
+    const endpoint = await call('POST', `/v1/projects/${alice.project.id}/endpoints`, {
+      token: alice.token,
+      body: { url: 'http://localhost:4000/ok', eventTypes: ['order.searched'] },
+    });
+
+    searchable = { apiKey: key.body.key, endpointId: endpoint.body.id };
+
+    await publish(searchable.apiKey, { orderId: 5150, customer: { id: 'cus_9' } });
+    await publish(searchable.apiKey, { orderId: 6000, customer: { id: 'cus_1' } });
+  });
+
+  it('lists events with the deliveries each one produced', async () => {
+    const response = await call(
+      'GET',
+      `/v1/projects/${alice.project.id}/events?eventType=order.searched`,
+      { token: alice.token },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.events).toHaveLength(2);
+
+    // Other endpoints in this suite subscribe to every event type, so the
+    // fan-out width is whatever the project holds; what the summary owes the
+    // caller is that it adds up to the deliveries the event actually produced.
+    const [newest] = response.body.events;
+    const counted = Object.values(newest.byStatus).reduce((total, value) => total + value, 0);
+
+    expect(newest.deliveryCount).toBeGreaterThanOrEqual(1);
+    expect(counted).toBe(newest.deliveryCount);
+  });
+
+  it('finds an event by a value inside its payload, at a nested path too', async () => {
+    const byNumber = await call(
+      'GET',
+      `/v1/projects/${alice.project.id}/events?payloadPath=orderId&payloadValue=5150`,
+      { token: alice.token },
+    );
+
+    expect(byNumber.body.events).toHaveLength(1);
+
+    const detail = await call('GET', `/v1/events/${byNumber.body.events[0].id}`, {
+      token: alice.token,
+    });
+
+    expect(detail.body.payload).toEqual({ orderId: 5150, customer: { id: 'cus_9' } });
+    expect(detail.body.deliveries.map((entry) => entry.endpointId)).toContain(
+      searchable.endpointId,
+    );
+
+    const byNestedPath = await call(
+      'GET',
+      `/v1/projects/${alice.project.id}/events?payloadPath=customer.id&payloadValue=cus_1`,
+      { token: alice.token },
+    );
+
+    expect(byNestedPath.body.events).toHaveLength(1);
+    expect(byNestedPath.body.events[0].id).not.toBe(byNumber.body.events[0].id);
+  });
+
+  it('does not find an event of another project holding the same value', async () => {
+    const response = await call(
+      'GET',
+      `/v1/projects/${bob.project.id}/events?payloadPath=orderId&payloadValue=5150`,
+      { token: bob.token },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.events).toEqual([]);
+  });
+
+  it('hides an event of another project behind the same 404 as a missing one', async () => {
+    const mine = await call('GET', `/v1/projects/${alice.project.id}/events?limit=1`, {
+      token: alice.token,
+    });
+
+    const response = await call('GET', `/v1/events/${mine.body.events[0].id}`, {
+      token: bob.token,
+    });
+
+    expect(response.status).toBe(404);
+  });
+
+  it('serves the payload search from the index rather than a sequential scan', async () => {
+    await clients.prisma.$executeRawUnsafe('SET enable_seqscan = off');
+
+    const plan = await clients.prisma.$queryRawUnsafe(
+      `EXPLAIN SELECT id FROM webhook_events WHERE payload @> '{"orderId":5150}'::jsonb`,
+    );
+
+    await clients.prisma.$executeRawUnsafe('SET enable_seqscan = on');
+
+    expect(JSON.stringify(plan)).toContain('webhook_events_payload_idx');
+  });
+});
+
 describe('realtime', () => {
   it('delivers a project event to that project only', async () => {
     const publisher = createRealtimePublisher({ redis: clients.redis });

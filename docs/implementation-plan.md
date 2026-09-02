@@ -128,7 +128,7 @@ Places where the work is likely to stall. Listed here rather than in the specs b
 Two gaps the API leaves open, recorded here rather than in the specs because they are build state, not behaviour:
 
 - `docs/dashboard.md` offers Register only when the instance has no user yet. No route reports whether any user exists, so the dashboard offers it unconditionally and lets `register` fail on a duplicate email. Closing this needs a backend probe.
-- Events has no endpoint of its own. The screen groups the loaded delivery rows by `eventId` and says so on screen, rather than claiming to be a complete event log.
+- ~~Events has no endpoint of its own. The screen groups the loaded delivery rows by `eventId` and says so on screen, rather than claiming to be a complete event log.~~ Closed in phase 8.3.
 
 ## Phase 7 — Polish and release
 
@@ -175,11 +175,11 @@ An endpoint that fails `ENDPOINT_AUTO_DISABLE_THRESHOLD` times in a row is disab
 
 The events screen groups the delivery rows it has already loaded, because the API has no event endpoint — the gap phase 6 recorded. Search closes the question an operator actually asks: which event carried this order, and what happened to it.
 
-- [ ] `GET /v1/projects/:projectId/events` — keyset pagination, filters `eventType`, `from`, `to`
-- [ ] Exact-containment payload search on a caller-supplied path and value, served by a GIN index on `WebhookEvent.payload`
-- [ ] `GET /v1/events/:eventId` — the event with the deliveries it produced
-- [ ] The events screen reads this endpoint and drops the note explaining that it groups loaded rows
-- [ ] `docs/api.md`, `docs/dashboard.md` and `docs/architecture.md` §11 updated; the phase 6 gap note closed
+- [x] `GET /v1/projects/:projectId/events` — keyset pagination, filters `eventType`, `from`, `to`
+- [x] Exact-containment payload search on a caller-supplied path and value, served by a GIN index on `WebhookEvent.payload`
+- [x] `GET /v1/events/:eventId` — the event with the deliveries it produced
+- [x] The events screen reads this endpoint and drops the note explaining that it groups loaded rows
+- [x] `docs/api.md`, `docs/dashboard.md` and `docs/architecture.md` §11 updated; the phase 6 gap note closed
 
 **Acceptance:** an integration test publishes one event that fans out to three endpoints, sees it as a single row on the events endpoint carrying its three deliveries, finds it by a value inside its payload, and does not find another project's event holding the same value. `EXPLAIN` shows the search using the index rather than a sequential scan.
 

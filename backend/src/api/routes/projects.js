@@ -6,6 +6,7 @@ import {
   apiKeySchema,
   bulkReplaySchema,
   deliveryFilterSchema,
+  eventFilterSchema,
   endpointCreateSchema,
   memberSchema,
   projectSchema,
@@ -17,6 +18,7 @@ export function createProjectRouter({
   apiKeyService,
   endpointService,
   deliveryService,
+  eventService,
   jwtAuth,
 }) {
   const router = Router();
@@ -119,6 +121,20 @@ export function createProjectRouter({
       res
         .status(201)
         .json(await endpointService.create({ projectId: req.params.projectId, ...req.validated }));
+    },
+  );
+
+  router.get(
+    '/projects/:projectId/events',
+    requireProjectRole(),
+    validateQuery(eventFilterSchema),
+    async (req, res) => {
+      res.status(200).json(
+        await eventService.list({
+          projectId: req.params.projectId,
+          filters: req.validatedQuery,
+        }),
+      );
     },
   );
 

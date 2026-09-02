@@ -119,6 +119,7 @@ model WebhookEvent {
   deliveries Delivery[]
 
   @@index([projectId, receivedAt(sort: Desc)])
+  @@index([payload(ops: JsonbPathOps)], type: Gin)
   @@map("webhook_events")
 }
 

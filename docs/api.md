@@ -113,6 +113,19 @@ Alerts are described in `docs/architecture.md` §10: unsigned, never retried, at
 
 Creating or updating a URL runs the SSRF guard synchronously and rejects a blocked target with `422` rather than accepting it and failing later at delivery time.
 
+## Events
+
+| Method | Path                             | Purpose                                                    |
+| ------ | -------------------------------- | ---------------------------------------------------------- |
+| GET    | `/v1/projects/:projectId/events` | events this project received; cursor pagination and search |
+| GET    | `/v1/events/:eventId`            | the event, its payload and the deliveries it produced      |
+
+Filters: `eventType`, `from`, `to`, `cursor`, `limit`, and the pair `payloadPath` / `payloadValue`. Pagination is keyset over `receivedAt` and `id`, the same shape the delivery list uses, and a page is `{ events, nextCursor }`.
+
+A list row carries `deliveryCount` and `byStatus`, the fan-out of that event counted by delivery status. The payload is list-only in the sense that it is _not_ there: it is returned by the single-event route, because a page of fifty payloads is a page nobody asked for.
+
+**Search** is exact containment at a path, not substring matching: `?payloadPath=customer.id&payloadValue=cus_9` finds events whose payload contains `{"customer":{"id":"cus_9"}}`. Both are required together; `payloadPath` alone is a `400`. JSON keeps `1234` and `"1234"` apart, so a numeric-looking value is matched as both. Containment is what the GIN index on `payload` answers; substring search across the whole document would need a trigram index whose write cost would land on the ingestion path, and it is deliberately out of scope.
+
 ## Deliveries
 
 | Method | Path                                             | Purpose                                                                      |

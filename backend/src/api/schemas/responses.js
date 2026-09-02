@@ -183,6 +183,41 @@ export const deliveryDetailResponse = delivery
   })
   .meta({ id: 'DeliveryDetail' });
 
+export const eventListResponse = z
+  .object({
+    events: z.array(
+      z.object({
+        id: z.string(),
+        eventType: z.string(),
+        receivedAt: timestamp,
+        deliveryCount: z.number().int(),
+        byStatus: z.record(z.string(), z.number().int()),
+      }),
+    ),
+    nextCursor: z.string().nullable(),
+  })
+  .meta({ id: 'EventList' });
+
+export const eventResponse = z
+  .object({
+    id: z.string(),
+    projectId: z.string(),
+    eventType: z.string(),
+    receivedAt: timestamp,
+    payload: z.unknown(),
+    deliveries: z.array(
+      z.object({
+        id: z.string(),
+        endpointId: z.string(),
+        status: z.string(),
+        attemptCount: z.number().int(),
+        createdAt: timestamp,
+        completedAt: timestamp.nullable(),
+      }),
+    ),
+  })
+  .meta({ id: 'Event' });
+
 export const deliveryListResponse = z
   .object({
     deliveries: z.array(

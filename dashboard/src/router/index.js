@@ -41,7 +41,18 @@ const routes = [
         name: 'endpoints',
         component: () => import('../views/EndpointsView.vue'),
       },
-      { path: 'events', name: 'events', component: () => import('../views/EventsView.vue') },
+      {
+        path: 'events',
+        name: 'events',
+        component: () => import('../views/EventsView.vue'),
+        children: [
+          {
+            path: ':eventId',
+            name: 'event',
+            component: () => import('../views/EventDetailPanel.vue'),
+          },
+        ],
+      },
       { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
     ],
   },

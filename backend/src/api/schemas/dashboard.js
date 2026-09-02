@@ -77,6 +77,27 @@ export const deliveryFilterSchema = z
   })
   .strict();
 
+export const eventFilterSchema = z
+  .object({
+    eventType: z.string().max(MAX_EVENT_TYPE_LENGTH).optional(),
+    from: z.iso.datetime({ offset: true }).optional(),
+    to: z.iso.datetime({ offset: true }).optional(),
+    payloadPath: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[A-Za-z0-9_.-]+$/)
+      .optional(),
+    payloadValue: z.string().max(500).optional(),
+    cursor: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .strict()
+  .refine((value) => value.payloadPath === undefined || value.payloadValue !== undefined, {
+    path: ['payloadValue'],
+    message: 'is required when payloadPath is given',
+  });
+
 export const bulkReplaySchema = deliveryFilterSchema
   .omit({ cursor: true, limit: true })
   .extend({ limit: z.coerce.number().int().min(1).optional() })

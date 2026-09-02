@@ -240,6 +240,7 @@ Endpoint        id, projectId, url, description, status: ACTIVE | DISABLED,
                 eventTypes String[], rateLimitPerMinute, consecutiveFailures, createdAt
 WebhookEvent    id, projectId, eventType, payload Jsonb, idempotencyKey, receivedAt
                 @@index([projectId, receivedAt(sort: Desc)])
+                @@index([payload(ops: JsonbPathOps)], type: Gin)
 Delivery        id, eventId, endpointId, status: PENDING | IN_FLIGHT | RETRYING |
                 SUCCEEDED | FAILED_PERMANENTLY | SKIPPED,
                 attemptCount, nextAttemptAt, lastError, completedAt,
@@ -269,6 +270,8 @@ Every dashboard query is scoped by a `projectId` derived from the membership set
 **Identifiers.** Primary keys are `cuid2` values carrying a type prefix, generated in the application layer by a single `shared/ids.js` helper: `usr_`, `prj_`, `key_`, `ep_`, `evt_`, `dlv_`, `att_`, `rt_`. The prefix makes an id self-describing in logs, dashboards and support requests, and makes a wrong-entity lookup fail loudly instead of silently returning nothing.
 
 **Time.** Every timestamp column is `timestamptz` and every value is stored in UTC. Conversion to a local zone happens in the dashboard only, and `from` / `to` filters are accepted as ISO-8601 with an explicit offset.
+
+The GIN index on `payload` serves one query: the containment test behind the event search, `payload @> '{"customer":{"id":"cus_9"}}'`. `jsonb_path_ops` is chosen over the default operator class because containment is the only operator the search uses, and the narrower class produces a smaller index for it.
 
 **Cascades.** `Membership`, `ApiKey`, `Endpoint` and `WebhookEvent` cascade from `Project`. `Delivery` cascades from `WebhookEvent`, and `DeliveryAttempt` from `Delivery`, which is what makes the retention job a single delete on `WebhookEvent`. `Delivery.endpointId` is `onDelete: Restrict`: deleting an endpoint with delivery history is refused, and the dashboard offers disable instead, so the audit trail cannot be erased by accident.
 

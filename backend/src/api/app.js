@@ -13,6 +13,7 @@ import { requestId } from './middleware/request-id.js';
 import { createPublishCounter, publishRequestMetrics } from './metrics/publish-counter.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createDeliveryRouter } from './routes/deliveries.js';
+import { createEventRouter } from './routes/events.js';
 import { createDocsRouter } from './routes/docs.js';
 import { createEndpointRouter } from './routes/endpoints.js';
 import { createHealthRouter } from './routes/health.js';
@@ -22,6 +23,7 @@ import { createPublishRouter } from './routes/publish.js';
 import { createApiKeyService } from './services/api-key-service.js';
 import { createAuthService } from './services/auth-service.js';
 import { createDeliveryService } from './services/delivery-service.js';
+import { createEventService } from './services/event-service.js';
 import { createEndpointService } from './services/endpoint-service.js';
 import { createProjectService } from './services/project-service.js';
 import { createPublishService } from './services/publish-service.js';
@@ -73,6 +75,7 @@ export function createApp({ prisma, redis, publisher, connection, topology, conf
   const apiKeyService = createApiKeyService({ prisma });
   const endpointService = createEndpointService({ prisma, config, publishService });
   const deliveryService = createDeliveryService({ prisma, publisher, config, logger });
+  const eventService = createEventService({ prisma });
 
   const jwtAuth = createJwtAuth({ prisma, config });
 
@@ -104,10 +107,12 @@ export function createApp({ prisma, redis, publisher, connection, topology, conf
       apiKeyService,
       endpointService,
       deliveryService,
+      eventService,
       jwtAuth,
     }),
     createEndpointRouter({ endpointService, jwtAuth }),
     createDeliveryRouter({ deliveryService, jwtAuth }),
+    createEventRouter({ eventService, jwtAuth }),
   );
 
   app.use(notFoundHandler);

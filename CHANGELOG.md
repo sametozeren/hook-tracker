@@ -11,8 +11,18 @@ change is listed here with the steps an existing deployment has to take.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-02
+
+Visibility and alerting: the dead-letter queue stops growing, a project can be told when something
+breaks, and events are queryable by what they carry.
+
 ### Added
 
+- An events endpoint and payload search. `GET /v1/projects/:projectId/events` lists what a project
+  received, keyset paginated, with `payloadPath` and `payloadValue` finding an event by a value
+  inside its payload — exact containment at a path, served by a GIN index. `GET /v1/events/:eventId`
+  returns the payload and the deliveries the event produced. The events screen reads these instead
+  of grouping the delivery rows it had loaded.
 - Per-project alerting. A project can set `alertWebhookUrl` in its settings and is told when an
   endpoint is auto-disabled, when the dead-letter queue crosses `ALERT_DLQ_THRESHOLD`, and when
   Redis or RabbitMQ becomes unreachable. Alerts are unsigned, never retried, suppressed to one per
@@ -24,9 +34,10 @@ change is listed here with the steps an existing deployment has to take.
 
 ### Upgrading
 
-- One additive migration: `projects.alertWebhookUrl`. `prisma migrate deploy` applies it; the
-  column is nullable and nothing behaves differently until an address is set.
-
+- Two additive migrations: `projects.alertWebhookUrl` and a GIN index on
+  `webhook_events.payload`. `prisma migrate deploy` applies both. The column is nullable and
+  nothing behaves differently until an address is set; the index build takes a lock proportional
+  to the table, and `CREATE INDEX CONCURRENTLY` is the manual alternative where that matters.
 - Messages already sitting in `webhook.dlq` were published without an expiry and will stay there.
   Purge them once, by hand, after deploying this version. No topology change is required — the
   expiry travels on the message, not on the queue.
@@ -121,5 +132,6 @@ delivery workers, the maintenance jobs, the dashboard, and a demo receiver.
 - There is no CI pipeline. Lint, both test suites, `prisma validate` and the Docker
   build are run locally and their output observed, as `docs/guidelines.md` requires.
 
-[Unreleased]: https://github.com/sametozeren/hook-tracker/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sametozeren/hook-tracker/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sametozeren/hook-tracker/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sametozeren/hook-tracker/releases/tag/v0.1.0

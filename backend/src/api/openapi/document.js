@@ -4,6 +4,7 @@ import {
   apiKeySchema,
   bulkReplaySchema,
   deliveryFilterSchema,
+  eventFilterSchema,
   endpointCreateSchema,
   endpointUpdateSchema,
   loginSchema,
@@ -20,6 +21,8 @@ import {
   bulkReplayResponse,
   deliveryDetailResponse,
   deliveryListResponse,
+  eventListResponse,
+  eventResponse,
   deliveryResponse,
   endpointCreatedResponse,
   endpointListResponse,
@@ -85,6 +88,8 @@ const projectId = pathParams({ projectId: z.string() });
 const endpointId = pathParams({ endpointId: z.string() });
 
 const deliveryId = pathParams({ deliveryId: z.string() });
+
+const eventId = pathParams({ eventId: z.string() });
 
 const dashboard = { security: [{ [USER_JWT_SCHEME]: [] }], tags: ['Dashboard'] };
 
@@ -318,6 +323,18 @@ export function createOpenApiDocument() {
           },
         },
       },
+      '/v1/projects/{projectId}/events': {
+        get: {
+          ...dashboard,
+          operationId: 'listEvents',
+          summary: 'Events this project received, keyset paginated, searchable by payload value',
+          requestParams: { ...projectId, query: eventFilterSchema },
+          responses: {
+            200: json('One page of events.', eventListResponse),
+            ...problems(400, 401, 404),
+          },
+        },
+      },
       '/v1/projects/{projectId}/deliveries': {
         get: {
           ...dashboard,
@@ -417,6 +434,18 @@ export function createOpenApiDocument() {
           responses: {
             202: json('The test event was queued.', publishAcceptedResponse),
             ...problems(401, 404, 422),
+          },
+        },
+      },
+      '/v1/events/{eventId}': {
+        get: {
+          ...dashboard,
+          operationId: 'getEvent',
+          summary: 'An event with its payload and the deliveries it produced',
+          requestParams: eventId,
+          responses: {
+            200: json('The event.', eventResponse),
+            ...problems(401, 404),
           },
         },
       },
