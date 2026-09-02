@@ -177,6 +177,7 @@ Only the dashboard and the API publish ports to the host.
 | [`docs/code-review.md`](docs/code-review.md) | The rules every change is reviewed against |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Phase order and completion state |
 | [`docs/receiving-webhooks.md`](docs/receiving-webhooks.md) | For teams on the receiving end |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed in each release, and what an upgrade has to do |
 
 ## Local development
 

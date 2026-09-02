@@ -1,0 +1,105 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
+project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
+major version is `0`, the wire contract — the `POST /v1/publish` request and response,
+the HMAC signature scheme, the outgoing webhook headers, the required environment
+variables and the queue topology — may still change in a minor release. Every such
+change is listed here with the steps an existing deployment has to take.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-09-02
+
+First release. A webhook gateway and retry engine that takes one event from your
+backend and becomes responsible for delivering it to every endpoint that wants it.
+`docker compose up` brings up the whole stack: Postgres, Redis, RabbitMQ, the API, the
+delivery workers, the maintenance jobs, the dashboard, and a demo receiver.
+
+### Added
+
+**Ingestion**
+
+- `POST /v1/publish` — API key authentication, zod-validated payloads, fan-out to every
+  matching `ACTIVE` endpoint or to an explicit `endpointIds` list, answering `202` with
+  the event id and the deliveries it created.
+- Idempotency on an `Idempotency-Key` header, defaulting to
+  `sha256(eventType + canonicalJson(payload))` when the header is absent. A repeat
+  within `IDEMPOTENCY_TTL_SECONDS` returns the original response with
+  `Idempotency-Replayed: true`; a concurrent duplicate is refused with `409`.
+- Per-key sliding-window rate limiting in Redis, with `RateLimit-Limit`,
+  `RateLimit-Remaining` and `RateLimit-Reset` on every publish response.
+- RFC 9457 `application/problem+json` errors throughout, each carrying the `requestId`
+  that also appears in the logs.
+
+**Delivery and retries**
+
+- TTL + DLX retry ladder on RabbitMQ — 1m, 5m, 30m, 2h, 6h, at most six attempts —
+  built from queue arguments alone, with no broker plugins.
+- Every attempt is a row: request headers, response status, body excerpt, duration and
+  error, kept for the life of the event.
+- Per-endpoint token-bucket rate limiting, consecutive-failure counting and automatic
+  disable, plus manual enable, disable and rotate-secret with a grace window.
+- Manual replay of a single delivery and bulk replay of a filtered set, each producing a
+  new delivery that records what it was replayed from.
+- Maintenance jobs: retention deletes events past `RETENTION_DAYS` in bounded batches,
+  and a sweeper returns deliveries stuck `IN_FLIGHT` past `STUCK_DELIVERY_MINUTES` to
+  `RETRYING` and republishes them.
+
+**Security**
+
+- HMAC-SHA256 request signing with a per-endpoint secret, encrypted at rest with
+  AES-256-GCM, and an overlap window so a rotated secret does not drop in-flight
+  deliveries.
+- SSRF guard on every endpoint URL — DNS resolution, private-range rejection and IP
+  pinning that keeps SNI and certificate validation intact — run when a URL is saved as
+  well as at delivery time.
+- API keys stored hashed and shown in full exactly once; argon2id passwords; refresh
+  tokens stored hashed and rotated on use; membership read from the database on every
+  request so removing someone takes effect immediately.
+- Secrets, API keys and `Authorization` headers removed from logs through a pino
+  redaction path list.
+
+**Dashboard**
+
+- Vue 3 dashboard served by nginx: deliveries with URL-persisted filters, delivery
+  detail with the attempt timeline and copy-as-cURL, endpoints, events and project
+  settings.
+- Live updates over Socket.io — rows patch in place as attempts land, without a manual
+  refresh.
+- Light and dark themes, following the system preference until the header toggle
+  overrides it.
+
+**Operations**
+
+- `GET /health` and `GET /ready`, the latter checking Postgres, Redis and RabbitMQ.
+- `GET /docs` and `GET /openapi.json`, generated from the same zod schemas the routes
+  validate with.
+- `GET /metrics` in Prometheus exposition format, deliberately low-cardinality: no
+  project id, endpoint id or URL appears in any label. Per-project figures come from
+  `GET /v1/projects/:projectId/stats`.
+- Structured JSON logs carrying `requestId` on the API and `deliveryId` with `attempt`
+  on the worker.
+
+**Documentation**
+
+- `docs/receiving-webhooks.md` for the team on the other end: signature verification,
+  timestamp tolerance, deduplication on `X-Webhook-Id`, which status code to answer
+  with, and working Node.js and Python receivers.
+- Architecture, API contract, dashboard and code-review specifications under `docs/`.
+
+### Known limitations
+
+- `SECRET_ENCRYPTION_KEY` cannot be rotated without re-encrypting every stored endpoint
+  secret; that migration is out of scope for this release.
+- The dashboard offers Register unconditionally, because no route reports whether an
+  instance already has a user.
+- The events screen groups the delivery rows it has loaded rather than reading a
+  complete event log, because the API has no event endpoint.
+- There is no CI pipeline. Lint, both test suites, `prisma validate` and the Docker
+  build are run locally and their output observed, as `docs/guidelines.md` requires.
+
+[Unreleased]: https://github.com/sametozeren/hook-tracker/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/sametozeren/hook-tracker/releases/tag/v0.1.0
