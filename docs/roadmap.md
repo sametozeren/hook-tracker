@@ -46,7 +46,6 @@ The registration model is the largest open question in the product. Today anyone
 | 15  | Healthchecks for `worker`, `jobs` and `dashboard`              | `restart: unless-stopped` only catches a process that exits; one that hangs is never noticed          | small  |
 | 16  | Log rotation limits in the compose file                        | The default json-file driver grows without a ceiling until the disk is full                           | small  |
 | 17  | An example TLS reverse proxy configuration                     | `SECURITY.md` says a deployment terminates TLS in front of the stack, and then leaves you to write it | small  |
-| 18  | [Connection-pool sizing guidance](connection-pool-sizing.md)  | Scaling workers multiplies Prisma pools against a default `max_connections` of 100 — **documented**   | small  |
 | 19  | Publish versioned images to a registry, with a rollback path   | Every deployment builds from source on the host; there is no artifact to roll back to                 | medium |
 | 20  | Zero-downtime deployment                                       | Rebuilding `api` in place drops requests for as long as the healthcheck takes                         | medium |
 | 21  | An example Prometheus scrape config, dashboard and alert rules | `/metrics` is exposed and low-cardinality, but nothing collects, draws or alerts on it                | medium |

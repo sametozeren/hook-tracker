@@ -7,7 +7,9 @@ import { config } from './config.js';
 export { Prisma };
 
 export function createPrismaClient({ connectionString = config.DATABASE_URL } = {}) {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString, max: config.DATABASE_POOL_SIZE }),
+  });
 }
 
 export const prisma = createPrismaClient();

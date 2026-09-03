@@ -179,17 +179,18 @@ Each roadmap item says why it matters and how big it is, and most of them are se
 
 ## Documentation
 
-| Document                                                     | Contents                                                                                 |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| [`docs/architecture.md`](docs/architecture.md)               | Data flow, queue topology, retry ladder, SSRF guard, data model, configuration reference |
-| [`docs/api.md`](docs/api.md)                                 | The v1 HTTP contract                                                                     |
-| [`docs/dashboard.md`](docs/dashboard.md)                     | Operator UI specification                                                                |
-| [`docs/guidelines.md`](docs/guidelines.md)                   | Coding, security and testing rules                                                       |
-| [`docs/code-review.md`](docs/code-review.md)                 | The rules every change is reviewed against                                               |
-| [`docs/implementation-plan.md`](docs/implementation-plan.md) | Phase order and completion state                                                         |
-| [`docs/receiving-webhooks.md`](docs/receiving-webhooks.md)   | For teams on the receiving end                                                           |
-| [`docs/roadmap.md`](docs/roadmap.md)                         | What is not built yet, why it matters, and how big each piece is                         |
-| [`CHANGELOG.md`](CHANGELOG.md)                               | What changed in each release, and what an upgrade has to do                              |
+| Document                                                           | Contents                                                                                 |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| [`docs/architecture.md`](docs/architecture.md)                     | Data flow, queue topology, retry ladder, SSRF guard, data model, configuration reference |
+| [`docs/api.md`](docs/api.md)                                       | The v1 HTTP contract                                                                     |
+| [`docs/dashboard.md`](docs/dashboard.md)                           | Operator UI specification                                                                |
+| [`docs/guidelines.md`](docs/guidelines.md)                         | Coding, security and testing rules                                                       |
+| [`docs/code-review.md`](docs/code-review.md)                       | The rules every change is reviewed against                                               |
+| [`docs/implementation-plan.md`](docs/implementation-plan.md)       | Phase order and completion state                                                         |
+| [`docs/receiving-webhooks.md`](docs/receiving-webhooks.md)         | For teams on the receiving end                                                           |
+| [`docs/connection-pool-sizing.md`](docs/connection-pool-sizing.md) | Prisma connection pool sizing formulas, scaling rules and PgBouncer guidance             |
+| [`docs/roadmap.md`](docs/roadmap.md)                               | What is not built yet, why it matters, and how big each piece is                         |
+| [`CHANGELOG.md`](CHANGELOG.md)                                     | What changed in each release, and what an upgrade has to do                              |
 
 ## Local development
 
