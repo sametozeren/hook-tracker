@@ -11,6 +11,11 @@ change is listed here with the steps an existing deployment has to take.
 
 ## [Unreleased]
 
+### Added
+
+- Documentation on connection-pool sizing for Prisma and PostgreSQL when scaling worker replicas (`docs/connection-pool-sizing.md`).
+- `DATABASE_POOL_SIZE` configuration variable (default `10`) in `backend/src/shared/env-schema.js`, `.env.example`, and wired to `@prisma/adapter-pg` in `backend/src/shared/db.js`.
+
 ## [0.3.0] - 2026-09-03
 
 An audit of the whole repository — the API surface, the operational topology, the dashboard, the
