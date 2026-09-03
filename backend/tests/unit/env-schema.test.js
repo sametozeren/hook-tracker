@@ -24,6 +24,7 @@ describe('env schema', () => {
     expect(result.success).toBe(true);
     expect(result.data.NODE_ENV).toBe('development');
     expect(result.data.PORT).toBe(3000);
+    expect(result.data.DATABASE_POOL_SIZE).toBe(10);
     expect(result.data.MAX_ATTEMPTS).toBe(6);
     expect(result.data.MAX_PAYLOAD_BYTES).toBe(262144);
     expect(result.data.RATE_LIMIT_PUBLISH_PER_MINUTE).toBe(600);

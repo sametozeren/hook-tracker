@@ -53,7 +53,7 @@ The stack wires `DATABASE_POOL_SIZE` end to end across three files:
 
 ```js
 // backend/src/shared/env-schema.js (Infrastructure block)
-DATABASE_POOL_SIZE: z.coerce.number().int().min(1).default(10);
+DATABASE_POOL_SIZE: z.coerce.number().int().min(1).default(10),
 ```
 
 2. In `.env.example`, the key is documented for operators:
