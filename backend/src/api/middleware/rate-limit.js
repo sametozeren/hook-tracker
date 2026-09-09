@@ -44,13 +44,12 @@ export function createRateLimiter({
 
     const results = await transaction.exec();
     const usedByKey = keys.map((_, index) => Number(results[index * 4 + 2][1]));
-    const resets = await Promise.all(keys.map((key) => resetSeconds(key, now)));
     const remainingByKey = identities.map(
       ({ limit: identityLimit }, index) => identityLimit - usedByKey[index],
     );
     const limitingIndex = remainingByKey.indexOf(Math.min(...remainingByKey));
     const limitingIdentity = identities[limitingIndex];
-    const reset = resets[limitingIndex];
+    const reset = await resetSeconds(keys[limitingIndex], now);
 
     res.setHeader('RateLimit-Limit', String(limitingIdentity.limit));
     res.setHeader('RateLimit-Remaining', String(Math.max(0, remainingByKey[limitingIndex])));
