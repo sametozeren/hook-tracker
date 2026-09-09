@@ -11,6 +11,7 @@ export function createRateLimiter({
   windowMs = WINDOW_MS,
   keyPrefix = 'ratelimit:publish',
   identify = (req) => req.auth.apiKeyId,
+  subject = 'this API key',
 }) {
   async function resetSeconds(key, now) {
     const [, oldestScore] = await redis.zrange(key, 0, 0, 'WITHSCORES');
@@ -23,26 +24,39 @@ export function createRateLimiter({
   }
 
   return async function rateLimit(req, res, next) {
-    const key = `${keyPrefix}:${identify(req)}`;
+    const identified = identify(req);
+    const identities = (Array.isArray(identified) ? identified : [identified]).map((identity) =>
+      typeof identity === 'object' ? identity : { value: identity, limit, subject },
+    );
+    const keys = identities.map(({ value }) => `${keyPrefix}:${value}`);
     const now = Date.now();
     const member = `${now}-${randomUUID()}`;
 
-    const results = await redis
-      .multi()
-      .zremrangebyscore(key, 0, now - windowMs)
-      .zadd(key, now, member)
-      .zcard(key)
-      .pexpire(key, windowMs)
-      .exec();
+    const transaction = redis.multi();
 
-    const used = Number(results[2][1]);
-    const reset = await resetSeconds(key, now);
+    for (const key of keys) {
+      transaction
+        .zremrangebyscore(key, 0, now - windowMs)
+        .zadd(key, now, member)
+        .zcard(key)
+        .pexpire(key, windowMs);
+    }
 
-    res.setHeader('RateLimit-Limit', String(limit));
-    res.setHeader('RateLimit-Remaining', String(Math.max(0, limit - used)));
+    const results = await transaction.exec();
+    const usedByKey = keys.map((_, index) => Number(results[index * 4 + 2][1]));
+    const resets = await Promise.all(keys.map((key) => resetSeconds(key, now)));
+    const remainingByKey = identities.map(
+      ({ limit: identityLimit }, index) => identityLimit - usedByKey[index],
+    );
+    const limitingIndex = remainingByKey.indexOf(Math.min(...remainingByKey));
+    const limitingIdentity = identities[limitingIndex];
+    const reset = resets[limitingIndex];
+
+    res.setHeader('RateLimit-Limit', String(limitingIdentity.limit));
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, remainingByKey[limitingIndex])));
     res.setHeader('RateLimit-Reset', String(reset));
 
-    if (used <= limit) {
+    if (remainingByKey.every((remaining) => remaining >= 0)) {
       next();
 
       return;
@@ -50,13 +64,22 @@ export function createRateLimiter({
 
     // The rejected call is removed again: a client that keeps hammering would
     // otherwise keep pushing its own window forward and never recover.
-    await redis.zrem(key, member);
+    const rollback = redis.multi();
 
-    throw new RateLimitedError(`${limit} requests per minute allowed for this API key`, {
-      'Retry-After': String(reset),
-      'RateLimit-Limit': String(limit),
-      'RateLimit-Remaining': '0',
-      'RateLimit-Reset': String(reset),
-    });
+    for (const key of keys) {
+      rollback.zrem(key, member);
+    }
+
+    await rollback.exec();
+
+    throw new RateLimitedError(
+      `${limitingIdentity.limit} requests per minute allowed for ${limitingIdentity.subject}`,
+      {
+        'Retry-After': String(reset),
+        'RateLimit-Limit': String(limitingIdentity.limit),
+        'RateLimit-Remaining': '0',
+        'RateLimit-Reset': String(reset),
+      },
+    );
   };
 }

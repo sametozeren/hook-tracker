@@ -49,7 +49,7 @@ Auth: API key. Headers: optional `Idempotency-Key`.
 }
 ```
 
-Failure modes: `400` invalid body, `401` missing or revoked key, `413` payload above `MAX_PAYLOAD_BYTES`, `409` idempotency key in flight, `422` no matching endpoint, `429` rate limited.
+Failure modes: `400` invalid body, `401` missing or revoked key, `413` payload above `MAX_PAYLOAD_BYTES`, `409` idempotency key in flight, `422` no matching endpoint, `429` when either the API key or its project reaches the publish limit.
 
 `413` is answered by the body parser, before authentication: a body that cannot be read cannot be authenticated either, and reading it to the end only to reject it is the thing the limit exists to prevent.
 
@@ -65,7 +65,7 @@ Every response carries `X-Request-Id`. A caller may set the header itself — it
 | POST   | `/v1/auth/logout`   | revokes the refresh token                        |
 | GET    | `/v1/auth/me`       | current user with memberships                    |
 
-Auth routes are rate limited per IP (20 attempts per minute), separately from the per-key ingestion limit, because the caller of a login attempt has no key yet.
+Auth routes are rate limited per address and account (20 attempts per minute), separately from the per-key and per-project ingestion limits, because the caller of a login attempt has no key yet.
 
 `register` and `login` return `{ user, project?, accessToken }` and set the refresh cookie. `refresh` returns a new `accessToken` and replaces the cookie; the token it was called with is revoked in the same step, so calling it twice with the same cookie is a `401`.
 
